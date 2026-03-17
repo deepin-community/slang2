@@ -2,7 +2,7 @@
  * way so that they may be used in slang scripts.
  */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -82,6 +82,10 @@ static Errno_Map_Type Errno_Map [] =
 # define EAGAIN	-1
 #endif
      {"Try again",			EAGAIN,	"EAGAIN"},
+#ifndef EWOULDBLOCK
+# define EWOULDBLOCK -1
+#endif
+   {"Operation would block",            EWOULDBLOCK, "EWOULDBLOCK"},
 #ifndef ENOMEM
 # define ENOMEM	-1
 #endif
@@ -566,7 +570,7 @@ int _pSLerrno_init (void)
    if (e != NULL)		       /* already initialized */
      return 0;
 
-   if ((-1 == SLadd_intrinsic_function ("errno_string", (FVOID_STAR) intrin_errno_string,
+   if ((-1 == SLadd_intrinsic_function ("errno_string", (FVOID_STAR)(SLFvoid_Star)intrin_errno_string,
 					SLANG_STRING_TYPE, 0))
        || (-1 == SLadd_intrinsic_variable ("errno", (VOID_STAR)&_pSLerrno_errno, SLANG_INT_TYPE, 1)))
      return -1;

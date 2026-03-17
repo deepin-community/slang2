@@ -39,8 +39,8 @@
   present, then it must be a reference to a variable that will be set
   to the value of the statistic upon return.
 \qualifiers
-\qualifier{mu=value}{Specifies the known mean of the normal distribution}.
-\qualifier{sigma}{Specifies the known standard deviation of the normal distribution}
+\qualifier{mean=value}{Specifies the known mean of the normal distribution}.
+\qualifier{stddev=value}{Specifies the known standard deviation of the normal distribution}
 \qualifier{cdf}{If present, the data will be interpreted as a CDFs of a known, but unspecified, distribution.}
 \notes
   For testing the hypothesis that a dataset is sampled from a known,
@@ -53,7 +53,22 @@
   Marsaglia and Marsaglia: Evaluating the Anderson-Darling
   Distribution, Journal of Statistical Software, Vol. 9, Issue 2, Feb
   2004.
-\seealso{ad_ktest, ks_test, t_test, z_test, normal_cdf, }
+\seealso{ad_ktest, ks_test, t_test, z_test, normal_cdf}
+\done
+
+
+\function{cumulant}
+\synopsis{Compute the first n cumulants of an array}
+\usage{[k1,...,kn] = cumulant (X, n)}
+\description
+ This function returns unbiased estimates of the first \exmp{n}
+ cumulants from an array \exmp{X} of samples of a probability
+ distribution.  The cumulants are returned as an array of size
+ \exmp{n}.
+\notes
+ The implementation currently restricts the value of n to 1, 2, 3, or 4.
+ The estimator of the nth cumulent is also known as the nth k-statistic.
+\seealso{mean, stddev, kurtosis, skewness}
 \done
 
 \function{median}
@@ -136,7 +151,7 @@
 \synopsis{Compute the skewness of an array of values}
 \usage{s = skewness (a)}
 \description
-  This function computes the so-called skewness of the array \exmp{a}.
+  This function computes the skewness (g1) of the array \exmp{a}.
 \seealso{mean, stddev, kurtosis}
 \done
 
@@ -144,7 +159,7 @@
 \synopsis{Compute the kurtosis of an array of values}
 \usage{s = kurtosis (a)}
 \description
- This function computes the so-called kurtosis of the array \exmp{a}.
+ This function computes the kurtosis (g2) of the array \exmp{a}.
 \notes
  This function is defined such that the kurtosis of the normal
  distribution is 0, and is also known as the ``excess-kurtosis''.
@@ -181,11 +196,11 @@
 
 \function{poisson_cdf}
 \synopsis{Compute the Poisson CDF}
-\usage{cdf = poisson_cdf (Double_Type m, Int_Type k)}
+\usage{cdf = poisson_cdf (Double_Type lambda, Int_Type k)}
 \description
  This function computes the CDF for the Poisson probability
- distribution parameterized by the value \exmp{m}.  For values of
- \exmp{m>100} and \exmp{abs(m-k)<sqrt(m)}, the Wilson and Hilferty
+ distribution parameterized by the value \exmp{lambda}.  For values of
+ \exmp{lambda>100} and \exmp{abs(lambda-k)<sqrt(lambda)}, the Wilson and Hilferty
  asymptotic approximation is used.
 \seealso{chisqr_cdf}
 \done

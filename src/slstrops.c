@@ -1,7 +1,7 @@
 /* -*- mode: C; mode: fold; -*- */
 /* string manipulation functions for S-Lang. */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -875,7 +875,7 @@ static void strskipchar_intrin (void)
 	goto free_and_return;
      }
    (void) SLang_push_wchar (wch);
-   /* drop */
+   /* fall through */
 free_and_return:
    SLang_free_slstring ((char *)str);
 }
@@ -913,7 +913,7 @@ static void strbskipchar_intrin (void)
 	goto free_and_return;
      }
    (void) SLang_push_wchar (wch);
-   /* drop */
+   /* fall through */
 free_and_return:
    SLang_free_slstring ((char *)str);
 }
@@ -1221,11 +1221,11 @@ static int arraymap_int_func_str_str (int (*func)(char *, char *, void *), void 
    for (i = 0; i < num; i++)
      int_at_data[i] = (*func)(aos.str, bos.sp[i], cd);
 
-   /* drop */
+   /* fall through */
 
 push_and_return:
    status = SLang_push_array (int_at, 1);
-   /* drop */
+   /* fall through */
 free_and_return:
    free_array_or_string (&aos);
    free_array_or_string (&bos);
@@ -1323,6 +1323,7 @@ static int func_issubstr (char *a, char *b, void *cd)
    SLstrlen_Type n;
    char *c;
 
+   if ((a == NULL) || (b == NULL)) return 0;
    (void) cd;
 
    if (NULL == (c = strstr(a, b)))
@@ -1955,6 +1956,12 @@ static char *SLdo_sprintf (char *fmt) /*{{{*/
 	 * to be.
 	 */
 	want_width = width = 0;
+	if (ch == '0')
+	  {
+	     *f++ = '0';
+	     ch = *p++;
+	  }
+
 	if (ch == '*')
 	  {
 	     if (SLang_pop_uinteger(&width)) return (out);
@@ -1963,12 +1970,6 @@ static char *SLdo_sprintf (char *fmt) /*{{{*/
 	  }
 	else
 	  {
-	     if (ch == '0')
-	       {
-		  *f++ = '0';
-		  ch = *p++;
-	       }
-
 	     while ((ch <= '9') && (ch >= '0'))
 	       {
 		  width = width * 10 + (ch - '0');
@@ -2054,12 +2055,12 @@ static char *SLdo_sprintf (char *fmt) /*{{{*/
 		  f1--;
 	       }
 
-	     /* drop */
+	     /* fall through */
 	   case 'S':
 	     if (ch == 'S')
 	       _pSLstring_intrinsic ();
 	     ch = 's';
-	     /* drop */
+	     /* fall through */
 	   case 's':
 	     if (-1 == SLang_pop_slstring(&str))
 	       return (out);
@@ -2164,7 +2165,7 @@ static char *SLdo_sprintf (char *fmt) /*{{{*/
 	     /* Pointer type?? Why?? */
 	     if (-1 == SLdo_pop ())
 	       return out;
-	     str = (char *) _pSLang_get_run_stack_pointer ();
+	     str = ((char *)NULL + SLstack_depth ());
 	     use_string = 1;
 	     use_long = 0;
 	     break;
@@ -2234,13 +2235,10 @@ int _pSLstrops_do_sprintf_n (int n) /*{{{*/
 {
    char *p;
    char *fmt;
-   SLang_Object_Type *ptr;
    int ofs;
 
    if (-1 == (ofs = SLreverse_stack (n + 1)))
      return -1;
-
-   ptr = _pSLang_get_run_stack_base () + ofs;
 
    if (SLang_pop_slstring(&fmt))
      return -1;
@@ -2248,7 +2246,7 @@ int _pSLstrops_do_sprintf_n (int n) /*{{{*/
    p = SLdo_sprintf (fmt);
    _pSLang_free_slstring (fmt);
 
-   SLdo_pop_n (_pSLang_get_run_stack_pointer () - ptr);
+   SLdo_pop_n (SLstack_depth () - ofs);
 
    if (_pSLang_Error)
      {
@@ -2413,20 +2411,85 @@ static int is_list_element_cmd (char *list, char *elem, SLwchar_Type *delim_ptr)
 /*}}}*/
 
 /* Regular expression routines for strings */
-static SLRegexp_Type *Regexp;
-static unsigned int Regexp_Match_Byte_Offset;
+#define NUM_CACHED_REGEXP 5
+typedef struct
+{
+   SLRegexp_Type *regexp;
+   char *pattern;
+   unsigned int match_byte_offset;
+}
+Regexp_Type;
+static unsigned int Cache_Indices[NUM_CACHED_REGEXP];
+static Regexp_Type Regexp_Cache[NUM_CACHED_REGEXP];
 
-static int string_match_internal (char *str, char *pat, int n) /*{{{*/
+static int init_regexp_cache (void)
+{
+   unsigned int i;
+
+   for (i = 0; i < NUM_CACHED_REGEXP; i++)
+     Cache_Indices[i] = i;
+
+   return 0;
+}
+
+static Regexp_Type *get_regexp (char *pat)
+{
+   Regexp_Type *r;
+   unsigned int i, j;
+
+   for (i = 0; i < NUM_CACHED_REGEXP; i++)
+     {
+	r = Regexp_Cache + Cache_Indices[i];
+	if (r->pattern != pat) continue; /* slstring comparison */
+
+	if ((r->regexp == NULL)
+	    && (NULL == (r->regexp = SLregexp_compile (pat, 0))))
+	  return NULL;
+
+	goto update_cache_and_return;
+     }
+
+   /* Here, r is set to Regexp_Cache + Cache_Indices[i] */
+
+   SLang_free_slstring (r->pattern);   /* NULL ok */
+   if (NULL == (r->pattern = SLang_create_slstring (pat)))
+     return NULL;
+
+   SLregexp_free (r->regexp);	       /* NULL ok */
+   if (NULL == (r->regexp = SLregexp_compile (pat, 0)))
+     return NULL;
+
+   /* Drop */
+
+update_cache_and_return:
+   i = r - Regexp_Cache;
+   if (i == Cache_Indices[0]) return r;
+
+   j = 1;
+   while (j < NUM_CACHED_REGEXP)
+     {
+	if (i != Cache_Indices[j])
+	  {
+	     j++;
+	     continue;
+	  }
+
+	while (j > 0)
+	  {
+	     Cache_Indices[j] = Cache_Indices[j-1];
+	     j--;
+	  }
+	Cache_Indices[0] = i;
+	break;
+     }
+   return r;
+}
+
+static int string_match_internal (char *str, Regexp_Type *r, int n) /*{{{*/
 {
    char *match;
    size_t len;
    size_t byte_offset;
-
-   if (Regexp != NULL)
-     {
-	SLregexp_free (Regexp);
-	Regexp = NULL;
-     }
 
    byte_offset = (unsigned int) (n - 1);
    len = strlen(str);
@@ -2434,11 +2497,9 @@ static int string_match_internal (char *str, char *pat, int n) /*{{{*/
    if (byte_offset > len)
      return 0;
 
-   if (NULL == (Regexp = SLregexp_compile (pat, 0)))
-     return -1;
-   Regexp_Match_Byte_Offset = byte_offset;
+   r->match_byte_offset = byte_offset;
 
-   if (NULL == (match = SLregexp_match (Regexp, str+byte_offset, len-byte_offset)))
+   if (NULL == (match = SLregexp_match (r->regexp, str+byte_offset, len-byte_offset)))
      return 0;
 
    return 1 + (int) (match - str);
@@ -2469,13 +2530,18 @@ static int pop_string_match_args (int nargs, char **strp, char **patp, int *np)
 
 static int string_match_cmd (void)
 {
+   Regexp_Type *r;
    char *str, *pat;
    int n, status;
 
    if (-1 == pop_string_match_args (SLang_Num_Function_Args, &str, &pat, &n))
      return -1;
 
-   status = string_match_internal (str, pat, n);
+   if (NULL == (r = get_regexp (pat)))
+     status = -1;
+   else
+     status = string_match_internal (str, r, n);
+
    SLang_free_slstring (str);
    SLang_free_slstring (pat);
    return status;
@@ -2484,20 +2550,22 @@ static int string_match_cmd (void)
 static int string_match_nth_cmd (int *nptr) /*{{{*/
 {
    SLuindex_Type ofs, len;
+   Regexp_Type *r;
 
-   if (Regexp == NULL)
+   r = Regexp_Cache + Cache_Indices[0];
+   if (r->regexp == NULL)
      {
 	_pSLang_verror (SL_RunTime_Error, "A successful call to string_match was not made");
 	return -1;
      }
 
-   if (-1 == SLregexp_nth_match (Regexp, (unsigned int) *nptr, &ofs, &len))
+   if (-1 == SLregexp_nth_match (r->regexp, (unsigned int) *nptr, &ofs, &len))
      {
 	_pSLang_verror (0, "SLregexp_nth_match failed");
 	return -1;
      }
 
-   ofs += Regexp_Match_Byte_Offset;
+   ofs += r->match_byte_offset;
 
    /* zero based return value */
    SLang_push_integer((int) ofs);
@@ -2508,15 +2576,19 @@ static int string_match_nth_cmd (int *nptr) /*{{{*/
 
 static int string_matches_internal (char *str, char *pat, int n)
 {
-   int status;
-   SLuindex_Type i;
    SLstrlen_Type lens[10];
    SLstrlen_Type offsets[10];
+   Regexp_Type *r;
    char **strs;
-   SLindex_Type num;
    SLang_Array_Type *at;
+   SLindex_Type num;
+   SLuindex_Type i;
+   int status;
 
-   status = string_match_internal (str, pat, n);
+   if (NULL == (r = get_regexp (pat)))
+     return -1;
+
+   status = string_match_internal (str, r, n);
    if (status <= 0)
      {
 	SLang_push_null ();
@@ -2525,9 +2597,9 @@ static int string_matches_internal (char *str, char *pat, int n)
 
    for (i = 0; i < 10; i++)
      {
-	if (-1 == SLregexp_nth_match (Regexp, i, offsets+i, lens+i))
+	if (-1 == SLregexp_nth_match (r->regexp, i, offsets+i, lens+i))
 	  break;
-	offsets[i] += Regexp_Match_Byte_Offset;
+	offsets[i] += r->match_byte_offset;
      }
 
    num = (SLindex_Type)i;
@@ -2644,7 +2716,7 @@ static void create_delimited_string_cmd (int *nptr)
      }
 
    str = create_delimited_string (strings + 1, (n - 1), strings[0]);
-   /* drop */
+   /* fall through */
    return_error:
    for (i = 0; i < n; i++) _pSLang_free_slstring (strings[i]);
    SLfree ((char *)strings);
@@ -2872,11 +2944,11 @@ static void skip_bytes_intrin (void)
 	if (-1 == SLang_pop_int (&nmax))
 	  return;
 	has_nmax = 1;
-	/* drop */
+	/* fall through */
       case 3:
 	if (-1 == SLang_pop_int (&n0))
 	  return;
-	/* drop */
+	/* fall through */
       default:
 	if (-1 == SLang_pop_slstring (&chars))
 	  return;
@@ -2916,7 +2988,7 @@ static void skip_bytes_intrin (void)
      goto free_and_return;
 
    (void) SLang_push_integer ((int)((char *)strmax - str));
-   /* drop */
+   /* fall through */
 
 free_and_return:
    SLang_free_slstring (str);
@@ -3126,5 +3198,7 @@ static SLang_Intrin_Fun_Type Strops_Table [] = /*{{{*/
 
 int _pSLang_init_slstrops (void)
 {
+   if (-1 == init_regexp_cache ()) return -1;
+
    return SLadd_intrin_fun_table (Strops_Table, NULL);
 }

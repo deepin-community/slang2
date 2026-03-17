@@ -255,6 +255,7 @@ cdf = anderson_darling_cdf (A2, nsamp)\n\
 
    variable i, j, a, zz;
 
+   % Evaluate adinf(z)
    i = where (0.0 < z < 2.0, &j);
    if (length (i))
      {
@@ -315,8 +316,10 @@ define ad_test ()
      usage ("\
 p = ad_test (X [,&Asquared]);\n\ %% 1-sample Anderson-Darling test\n\
 Qualifiers:\n\
-  ;cdf   %% The X values are the CDFs of the underlying distribution\n\
-         %%   and 0 <= X <= 1\n\
+  ;cdf        %% The X values are the CDFs of the underlying distribution\n\
+              %%   and 0 <= X <= 1\n\
+  ;mean=val   %% The mean of the assumed normal distribution\n\
+  ;stddev=val %% The stddev of the assumed normal distribution\n\
 "
 	   );
 
@@ -350,8 +353,6 @@ Qualifiers:\n\
    variable ii = [1:2*n:2];
    variable a2 = -n - (sum(ii*log(cdf) + (2*n-ii)*log(1.0-cdf)))/n;
 
-   a2 = factor * a2;
-
    if (s_ref != NULL)
      @s_ref = a2;
 
@@ -359,6 +360,7 @@ Qualifiers:\n\
      {
 	return 1.0 - anderson_darling_cdf (a2, n);
      }
+   a2 = factor * a2;
 
    % Augostino & Stephens, 1986
    if (a2 >= 0.6)

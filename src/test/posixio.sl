@@ -8,7 +8,9 @@ define run_tests (some_text)
    variable new_text, nbytes, len;
    variable pos;
 
-   file = util_make_tmp_file ("tmpfile", &fd);
+   % Avoid an NFS mount.  The flock function can fail if lockd is not
+   % running on the server
+   file = util_make_tmp_file ("/tmp/sltest-tmpfile", &fd);
 
    if (-1 == write (fd, some_text))
      failed ("write");
@@ -44,6 +46,23 @@ define run_tests (some_text)
      failed ("read at EOF");
    if (bstrlen (new_text))
      failed ("read at EOF");
+
+   if (0 == flock (fd, LOCK_EX))
+     {
+	variable fp = fopen (file, "r");
+	if ((-1 != flock (fp, LOCK_EX|LOCK_NB))
+	    || (errno != EWOULDBLOCK))
+	  {
+	     () = failed ("flock LOCK_NB");
+	  }
+	() = fclose (fp);
+     }
+   else failed ("flock LOCK_EX: %S", errno_string());
+
+   if (-1 == flock (fd, LOCK_UN))
+     {
+	failed ("flock LOCK_UN: %S", errno_string());
+     }
 
    if (-1 == _close (_fileno(fd))) failed ("_close after tests");
    if (0 == close (fd))

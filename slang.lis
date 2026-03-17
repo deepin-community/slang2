@@ -132,7 +132,9 @@
 @modules/base64.sl
 @modules/chksum-module.c
 @modules/chksum_sha1.c
+@modules/chksum_sha2.c
 @modules/chksum_md5.c
+@modules/chksum_crc.c
 @modules/chksum.h
 @modules/chksum.sl
 @modules/csv-module.c
@@ -185,6 +187,7 @@
 @modules/test/test.sl
 @modules/test/test_base64.sl
 @modules/test/test_chksum.sl
+@modules/test/test_crc.sl
 @modules/test/test_csv.sl
 @modules/test/test_fcntl.sl
 @modules/test/test_fork.sl
@@ -299,6 +302,7 @@
 @slsh/lib/profile.sl
 @slsh/lib/print.sl
 @slsh/lib/slshhelp.sl
+@slsh/lib/timestamp.sl
 @slsh/lib/cmdopt.sl
 @slsh/lib/readascii.sl
 @slsh/lib/process.sl
@@ -326,6 +330,7 @@
 @slsh/lib/help/process.hlp
 @slsh/lib/help/setfuns.hlp
 @slsh/lib/help/listfuns.hlp
+@slsh/lib/help/timestamp.hlp
 
 @slsh/lib/tm/Makefile
 @slsh/lib/tm/arrayfuns.tm
@@ -340,6 +345,7 @@
 @slsh/lib/tm/process.tm
 @slsh/lib/tm/setfuns.tm
 @slsh/lib/tm/listfuns.tm
+@slsh/lib/tm/timestamp.tm
 
 @slsh/lib/test/runtests.sh 0755
 @slsh/lib/test/common.sl
@@ -350,6 +356,7 @@
 @slsh/lib/test/test_process.sl
 @slsh/lib/test/test_setfuns.sl
 @slsh/lib/test/test_listfuns.sl
+@slsh/lib/test/test_timestamp.sl
 
 @slsh/doc/tm/slsh.tm
 @slsh/doc/tm/Makefile
@@ -379,6 +386,7 @@
 @slsh/scripts/jpegsize 0755
 @slsh/scripts/svnsh 0755
 @slsh/scripts/sldb 0755
+@slsh/scripts/slcov 0755
 @slsh/scripts/slprof 0755
 @slsh/scripts/slstkchk 0755
 @slsh/slsh.c

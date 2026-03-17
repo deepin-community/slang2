@@ -1,4 +1,4 @@
-% Copyright (C) 2012-2017,2018 John E. Davis
+% Copyright (C) 2012-2021,2022 John E. Davis
 %
 % This file is part of the S-Lang Library and may be distributed under the
 % terms of the GNU General Public License.  See the file COPYING for
@@ -6,7 +6,7 @@
 %---------------------------------------------------------------------------
 import ("csv");
 
-private define read_fp_callback (info)
+private define read_fp_callback (in_quote, info)
 {
    variable line, comment_char = info.comment_char;
    forever
@@ -14,15 +14,17 @@ private define read_fp_callback (info)
 	if (-1 == fgets (&line, info.fp))
 	  return NULL;
 
+	info.line_num++;
 	if ((line[0] == comment_char)
-	     && (0 == strnbytecmp (line, info.comment, info.comment_len)))
+	    && (in_quote == 0)
+	    && (0 == strnbytecmp (line, info.comment, info.comment_len)))
 	  continue;
 
 	return line;
      }
 }
 
-private define read_strings_callback (str_info)
+private define read_strings_callback (in_quote, str_info)
 {
    variable line;
 
@@ -39,25 +41,46 @@ private define read_strings_callback (str_info)
    if (line[-1] != '\n')
      str_info.output_crlf = 1;
 
+   str_info.line_num++;
    return line;
 }
 
-private define resize_arrays (list, n)
+private define resize_arrays (arrays, n)
 {
-   _for (0, length(list)-1, 1)
+   _for (0, length(arrays)-1, 1)
      {
 	variable i = ();
-	variable a = list[i];
+	variable a = arrays[i];
 	variable m = length(a);
+	if (m == n) continue;
 	if (m > n)
 	  {
-	     list[i] = a[[:n-1]];
+	     arrays[i] = a[[:n-1]];
 	     continue;
 	  }
 	variable b = _typeof(a)[n];
 	b[[:m-1]] = a;
-	list[i] = b;
+	arrays[i] = b;
      }
+}
+
+private define merge_column_arrays (list_of_column_arrays)
+{
+   variable j, n = length (list_of_column_arrays);
+   variable column_arrays = list_of_column_arrays[0];
+   variable i, ncols = length (column_arrays);
+   variable merged = {};
+   _for i (0, ncols-1, 1)
+     {
+	variable array_list = {};
+	_for j (0, n-1, 1)
+	  {
+	     column_arrays = list_of_column_arrays[j];
+	     list_append (array_list, column_arrays[i]);
+	  }
+	list_append (merged, [__push_list(__tmp(array_list))]);
+     }
+   return merged;
 }
 
 private define atofloat (x)
@@ -99,18 +122,7 @@ private define fixup_header_names (names)
    variable i = where (names == "");
    names[i] = array_map (String_Type, &sprintf, "col%d", i+1);
 
-#iffalse
-   % This code is nolonger necessary since slang now allows arbitrary
-   % structure names.
-   names = strtrans (names, "^\\w", "_");
-   names = strcompress (names, "_");
-
-   _for i (0, length(names)-1, 1)
-     {
-	if ('0' <= names[i][0] <= '9')
-	  names[i] = "_" + names[i];
-     }
-#endif
+   names = strtrim (names);	       %  strip leading/trailing WS
    if (is_scalar) names = names[0];
    return names;
 }
@@ -147,6 +159,7 @@ Qualifiers:\n\
  typeNTH=val (specifiy type for NTH column)\n\
  snan=\"\", inan=0, lnan=0L, fnan=_NaN, dnan=_NaN (defaults for empty fields),\n\
  nanNTH=val (value used for an empty field in the NTH column\n\
+ init_size=int (number of rows to initially read)\n\
 "
 	     );
      }
@@ -166,6 +179,8 @@ Qualifiers:\n\
    variable fnan = qualifier ("fnan", typecast(_NaN,Float_Type));
    variable inan = qualifier ("inan", 0);
    variable lnan = qualifier ("lnan", 0L);
+   variable init_size = qualifier ("init_size", 0x8000);
+   if (init_size <= 0) init_size = 0x8000;
 
    if ((fields != NULL) && (columns != NULL)
        && (length(fields) != length(columns)))
@@ -190,22 +205,49 @@ Qualifiers:\n\
 	     col = columns[i];
 	     j = wherefirst (col == header);
 	     if (j == NULL)
-	       throw InvalidParmError, "Unknown (canonical) column name $col";
+	       throw InvalidParmError, "Unknown (canonical) column name $col"$;
 	     column_ints[i] = j+1;
 	  }
      }
 
-   variable row_data = _csv_decode_row (csv.decoder, flags);
-   if (column_ints == NULL)
-     column_ints = [1:length(row_data)];
-
-   if (any(column_ints>length(row_data)))
+   variable datastruct = NULL, ncols, row_data, e;
+   try (e)
      {
-	throw InvalidParmError, "column number is too large for data";
+	row_data = _csv_decode_row (csv.decoder, flags);
      }
-   variable ncols = length(column_ints);
+   catch AnyError:
+     {
+	throw e.error, sprintf ("Error encountered decoding line %S: %S", csv.func_data.line_num, e.message);
+     }
 
-   variable datastruct = NULL;
+   variable nread = 0;
+   if (row_data != NULL)
+     {
+	nread++;
+
+	if (column_ints == NULL)
+	  column_ints = [1:length(row_data)];
+
+	if (any(column_ints>length(row_data)))
+	  {
+	     throw InvalidParmError, "column number is too large for data";
+	  }
+     }
+
+   if (column_ints == NULL)
+     {
+	if (fields != NULL)
+	  ncols = length(fields);
+	else if (columns_are_string)
+	  ncols = length(columns);
+	else if (header != NULL)
+	  ncols = length (header);
+	else
+	  throw RunTimeError, "Insufficient information to determine the number of columns in the CSV file";
+
+       column_ints = [1:ncols];
+     }
+
    if (fields == NULL)
      {
 	if (columns_are_string)
@@ -215,6 +257,7 @@ Qualifiers:\n\
 	else
 	  fields = array_map(String_Type, &sprintf, "col%d", column_ints);
      }
+   ncols = length(fields);
    datastruct = @Struct_Type(fields);
 
    column_ints -= 1;		       %  make 0-based
@@ -243,7 +286,9 @@ Qualifiers:\n\
    _for i (1, ncols, 1)
      {
 	i1 = i-1;
-	types[i1] = qualifier ("type$i"$, types[i1]);
+	val = qualifier ("type$i"$, types[i1]);
+
+	types[i1] = val;
      }
 
    i = where(types=='i');
@@ -266,27 +311,30 @@ Qualifiers:\n\
 	       {
 		  convert_funcs[i1] = &atof;
 		  nan_values[i1] = dnan;
-		  types[i1] = 'd';
 	       }
 	     else if (type == Int_Type)
 	       {
 		  convert_funcs[i1] = &atoi;
 		  nan_values[i1] = inan;
-		  types[i1] = 'i';
 	       }
-	     else types[i1] = 's';
 	  }
 
 	val = nan_values[i1];
 	nan_values[i1] = typecast (qualifier ("nan$i"$, val), typeof(val));
      }
 
-   variable list_of_arrays = {}, array;
-   variable init_size = 0x8000;
+   variable column_arrays = Array_Type[ncols], array;
    variable dsize = init_size;
    variable max_allocated = init_size;
+   variable list_of_column_arrays = {};
    _for i (0, ncols-1, 1)
      {
+	if (row_data == NULL)
+	  {
+	     column_arrays[i] = typeof(nan_values[i])[0];
+	     continue;
+	  }
+
 	val = row_data[column_ints[i]];
 	array = typeof(nan_values[i])[max_allocated];
 	ifnot (strbytelen(val))
@@ -298,13 +346,23 @@ Qualifiers:\n\
 	       val = (@convert_func)(val);
 	  }
 	array[0] = val;
-	list_append (list_of_arrays, array);
+	column_arrays[i] = array;
      }
+   list_append (list_of_column_arrays, column_arrays);
 
-   variable nread = 1;
    variable min_row_size = 1+max(column_ints);
-   while (row_data = _csv_decode_row (csv.decoder, flags), row_data != NULL)
+   forever
      {
+	try (e)
+	  {
+	     row_data = _csv_decode_row (csv.decoder, flags);
+	  }
+	catch AnyError:
+	  {
+	     throw e.error, sprintf ("Error encountered decoding line %S: %S", csv.func_data.line_num, e.message);
+	  }
+	if (row_data == NULL) break;
+
 	if (length (row_data) < min_row_size)
 	  {
 	     % FIXME-- make what to do here configurable
@@ -316,8 +374,11 @@ Qualifiers:\n\
 
 	if (nread >= max_allocated)
 	  {
-	     max_allocated += dsize;
-	     resize_arrays (list_of_arrays, max_allocated);
+	     column_arrays = Array_Type[ncols];
+	     _for i (0, ncols-1, 1)
+	       column_arrays[i] = _typeof(list_of_column_arrays[0][i])[max_allocated];
+	     list_append (list_of_column_arrays, column_arrays);
+	     nread = 0;
 	  }
 
 	_for i (0, ncols-1, 1)
@@ -325,21 +386,23 @@ Qualifiers:\n\
 	     val = row_data[column_ints[i]];
 	     ifnot (strbytelen(val))
 	       {
-		  list_of_arrays[i][nread] = nan_values[i];
+		  column_arrays[i][nread] = nan_values[i];
 		  continue;
 	       }
 	     convert_func = convert_funcs[i];
 	     if (convert_func == NULL)
 	       {
-		  list_of_arrays[i][nread] = val;
+		  column_arrays[i][nread] = val;
 		  continue;
 	       }
-	     list_of_arrays[i][nread] = (@convert_func)(val);
+	     column_arrays[i][nread] = (@convert_func)(val);
 	  }
 	nread++;
      }
-   resize_arrays (list_of_arrays, nread);
-   set_struct_fields (datastruct, __push_list(list_of_arrays));
+   resize_arrays (__tmp(column_arrays), nread);
+   list_of_column_arrays = merge_column_arrays (__tmp(list_of_column_arrays));
+
+   set_struct_fields (datastruct, __push_list(list_of_column_arrays));
    return datastruct;
 }
 
@@ -352,7 +415,7 @@ Qualifiers:\n\
   quote='\"', delim=',', skiplines=0, comment=string");
 
    variable fp = ();
-   variable type = typeof(fp);
+   variable type = typeof(fp), file = fp;
    variable func = &read_fp_callback;
    variable func_data;
 
@@ -369,6 +432,7 @@ Qualifiers:\n\
 	func_data = struct
 	  {
 	     strings = fp,
+	     line_num = skiplines,
 	     i = skiplines, n = length(fp),
 	     output_crlf = 0,
 	     comment_char = comment_char,
@@ -377,21 +441,31 @@ Qualifiers:\n\
      }
    else
      {
+	variable line;
 	if (type != File_Type)
 	  {
-	     fp = fopen (fp, "r");
+	     fp = fopen (file, "r");
 	     if (fp == NULL)
-	       throw OpenError, "Unable to open CSV file"$;
+	       throw OpenError, "Unable to open CSV file '$file'"$;
+
+	     % Ignore a BOM if it exists
+	     if (-1 != fgets (&line, fp))
+	       {
+		  if (0 == strnbytecmp (line, "\xEF\xBB\xBF", 3))
+		    () = fseek (fp, 3, SEEK_SET);
+		  else
+		    () = fseek (fp, 0, SEEK_SET);
+	       }
 	  }
 
 	func_data = struct
 	  {
 	     fp = fp,
+	     line_num = skiplines,
 	     comment_char = comment_char,
 	     comment = comment,
 	     comment_len = ((comment == NULL) ? 0 : strbytelen(comment)),
 	  };
-	variable line;
 	loop (skiplines)
 	  () = fgets (&line, fp);
      }
@@ -401,6 +475,7 @@ Qualifiers:\n\
 	decoder = _csv_decoder_new (func, func_data, delim, quote, flags),
 	readrow = &read_row,
 	readcol = &read_cols,
+	func_data = func_data,
      };
 
    return csv;
@@ -471,10 +546,21 @@ Qualifiers:\n\
 	  }
      }
 
-   variable ncols = length(data);
-   if (length (data) == 0)
+   variable i, ncols = length(data);
+   if (ncols == 0)
      return;
-   variable nrows = length(data[0]), i, j;
+
+   % The following assumes that data is a list or array of lists or
+   % array.
+   data = @data;
+   _for i (0, ncols-1, 1)
+     {
+	variable t = typeof(data[i]);
+	if ((t != List_Type) && (t != Array_Type))
+	  data[i] = [data[i]];
+     }
+
+   variable nrows = length(data[0]), j;
    _for i (1, ncols-1, 1)
      {
 	if (nrows != length(data[i]))
@@ -573,44 +659,24 @@ private define convert_to_numeric (s, name)
 	set_struct_field (s, name, val);
      }
 
-   variable types = DataType_Type[num];
    _for (0, length (val)-1, 1)
      {
 	variable i = ();
 	variable type = _slang_guess_type (val[i]);
-	if (type == Double_Type)
+	if ((type == Double_Type) || (type == Float_Type))
 	  {
 	     val = atof (val);
 	     return;
 	  }
-	types[i] = type;
+	if (type == String_Type)
+	  return;
+	% Otherwise an integer
      }
 
-   if (all (types == Int_Type))
-     {
-	val = atoi (val);
-	return;
-     }
-
-   if (any (types == Float_Type))
-     {
-	val = atofloat (val);
-	return;
-     }
-
-   if (any (types == Long_Type))
-     {
-	val = atol (val);
-	return;
-     }
-
-   if (any (types == Int_Type))
-     {
-	val = atoi (val);
-	return;
-     }
-
-   val = atof (val);
+   variable lval = atol (val);
+   val = atoi (val);
+   if (any(val != lval))
+     val = lval;
 }
 
 define csv_readcol ()
@@ -643,13 +709,16 @@ Qualifiers:\n\
    % second line gives the field types.
    if (rdb)
      {
-	q = struct { comment = "#", delim = '\t' };
+	q = struct { @q, comment = "#", delim = '\t' };
      }
    variable types = NULL;
    variable csv = csv_decoder_new (file ;; q);
    if (rdb || qualifier_exists ("has_header"))
      {
 	variable header = csv.readrow ();
+	if (header == NULL)
+	  throw ReadError, "Unable to read a CSV header row";
+
 	q = struct { header=header, @q };
 	if (rdb)
 	  {

@@ -1,3 +1,43 @@
+slang2 (2.3.3-5) unstable; urgency=medium
+
+  * Standards-Version: 4.7.0; no changes required
+  * Fix broken symlink in udeb. Closes: #1070828
+  * Support noudeb profile, thanks to Helmut Grohne. Closes: #0124934
+  * Drop obsolete README.Debian. Closes: #890429
+
+ -- Alastair McKinstry <mckinstry@debian.org>  Fri, 10 May 2024 06:28:20 +0100
+
+slang2 (2.3.3-4) unstable; urgency=medium
+
+  * Fix for leap year calculation. Closes:#1065723
+  * Standards-Version: 4.6.2
+
+ -- Alastair McKinstry <mckinstry@debian.org>  Wed, 13 Mar 2024 08:55:37 +0000
+
+slang2 (2.3.3-3) unstable; urgency=medium
+
+  * Drop obsolete B-D on libncurses-dev. Closes: #1029983
+
+ -- Alastair McKinstry <mckinstry@debian.org>  Mon, 30 Jan 2023 08:56:49 +0000
+
+slang2 (2.3.3-2) unstable; urgency=medium
+
+  * Mark libslang-pic as Multi-Arch same
+  * Rebuild against unicode-data 15
+
+ -- Alastair McKinstry <mckinstry@debian.org>  Fri, 16 Sep 2022 18:16:15 +0100
+
+slang2 (2.3.3-1) unstable; urgency=medium
+
+  * New upstream release
+  * Move to debhelper level 13
+  * Standards-Version: 4.6.1
+  * Point vcs-git to -b debian/latest
+  * Patch from Gisle Valem for C++ support
+  * Move some install stuff from rules to libslang2-modules.install
+
+ -- Alastair McKinstry <mckinstry@debian.org>  Tue, 09 Aug 2022 09:47:51 +0100
+
 slang2 (2.3.2-5) unstable; urgency=medium
 
   * Use debhelper-compat (=12)

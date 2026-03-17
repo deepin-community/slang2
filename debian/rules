@@ -46,8 +46,6 @@ override_dh_auto_install:
 	ln -sf /usr/lib/${DEB_HOST_MULTIARCH}/libslang.so.2 debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/libslang.so
 	chrpath -d debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/slang/v2/modules/*.so
 	chrpath -d debian/tmp/usr/bin/slsh
-	mkdir -p debian/libslang2-modules/usr/lib/${DEB_HOST_MULTIARCH}/slang/v2/modules
-	mv debian/tmp/usr/lib/*/slang/v2/modules/* debian/libslang2-modules/usr/lib/${DEB_HOST_MULTIARCH}/slang/v2/modules
 
 override_dh_installchangelogs:
 	dh_installchangelogs -a changes.txt

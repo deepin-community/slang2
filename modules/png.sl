@@ -1,4 +1,4 @@
-% Copyright (C) 2012-2017,2018 John E. Davis
+% Copyright (C) 2012-2021,2022 John E. Davis
 %
 % This file is part of the S-Lang Library and may be distributed under the
 % terms of the GNU General Public License.  See the file COPYING for
@@ -82,8 +82,15 @@ define png_get_colormap_names ()
 
 define png_rgb_to_gray (rgb)
 {
-   variable gray = ((rgb&0xFF) + ((rgb&0xFF00)shr 8) + ((rgb&0xFF0000)shr 16));
-   return typecast ((__tmp(gray)/3.0), UChar_Type);
+   variable w = 1.0;
+   w = qualifier ("wghts", w);
+   if (length (w) != 3)
+     w = [w[0], w[0], w[0]];
+   w /= sum(w);
+   if (any(isnan(w) or isinf(w))) w[*] = 1.0/3;
+
+   variable gray = (w[2]*(rgb&0xFF) + w[1]*((rgb&0xFF00)shr 8) + w[0]*((rgb&0xFF0000)shr 16));
+   return typecast (__tmp(gray), UChar_Type);
 }
 
 private define normalize_gray (gray, nlevels)
@@ -112,8 +119,8 @@ private define normalize_gray (gray, nlevels)
 
    if (g0 != g1)
      {
-	variable factor = nlevels/double(g1-g0);
-	gray = typecast ((gray-g0)*factor, Int_Type);
+	variable factor = (nlevels-1)/double(g1-g0);
+	gray = nint((gray-g0)*factor);
 	gray[where (gray<0)] = 0;
 	gray[where (gray>=nlevels)] = (nlevels-1);
      }

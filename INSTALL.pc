@@ -28,13 +28,14 @@ something goes wrong here, fix it before going to step 3.
 
 The final step installs the library and its components.  The actual
 work is carried out by slsh, which was created in step 2.  Please
-note, if you make an changes the installation paths in the makefile
+note, if you make any changes the installation paths in the makefile
 after completing step 2, then you will need to rebuild it.  That is,
 run `mingw32-make clean', then go to step 2.
 
 Finally you will need to make sure that the $PREFIX/bin directory is
-in your PATH.  Assuming that this has been done, you should be able
-to run `slsh' at the CMD prompt.
+in your PATH.  Here, $PREFIX refers to the value of the PREFIX
+variable in the Makefile.  Assuming that this has been done, you
+should be able to run `slsh' at the CMD prompt.
 
 More information on the makefile generation process is available
 in src/mkfiles/README.

@@ -1,7 +1,7 @@
 /* -*- mode: C; mode: fold; -*- */
 /* slang.c  --- guts of S-Lang interpreter */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -169,7 +169,6 @@ static unsigned int This_Compile_Linenum;
 int SLang_Num_Function_Args = 0;
 static int *Num_Args_Stack;
 static unsigned int Recursion_Depth;
-static SLang_Object_Type *Frame_Pointer;
 static int Next_Function_Num_Args;
 
 static unsigned int Frame_Pointer_Depth;
@@ -222,9 +221,10 @@ static int Lang_Break = 0;
 static int Lang_Return = 0;
 /* static int Lang_Continue = 0; */
 
-static SLang_Object_Type *Run_Stack;
-static SLang_Object_Type *Stack_Pointer;
-static SLang_Object_Type *Stack_Pointer_Max;
+static SLang_Object_Type *Run_Stack = NULL;
+static SLang_Object_Type *Run_Stack_Stack_Pointer = NULL;
+static SLang_Object_Type *Run_Stack_Stack_Pointer_Max = NULL;
+static SLang_Object_Type *Run_Stack_Frame_Pointer = NULL;
 
 static SLang_Object_Type *Local_Variable_Stack;
 static SLang_Object_Type *Local_Variable_Stack_Max;
@@ -302,7 +302,7 @@ _INLINE_ static int pop_object (SLang_Object_Type *x)
 {
    register SLang_Object_Type *y;
 
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
    IF_UNLIKELY(y == Run_Stack)
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
@@ -312,7 +312,7 @@ _INLINE_ static int pop_object (SLang_Object_Type *x)
    y--;
    *x = *y;
 
-   Stack_Pointer = y;
+   Run_Stack_Stack_Pointer = y;
    return 0;
 }
 
@@ -326,7 +326,7 @@ static int pop_2_objs (SLang_Object_Type *a, SLang_Object_Type *b)
 {
    register SLang_Object_Type *y;
 
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
    if (Run_Stack + 2 > y)
      {
@@ -338,7 +338,7 @@ static int pop_2_objs (SLang_Object_Type *a, SLang_Object_Type *b)
      }
    *b = *(--y);
    *a = *(--y);
-   Stack_Pointer = y;
+   Run_Stack_Stack_Pointer = y;
    return 0;
 }
 #endif
@@ -353,7 +353,7 @@ static int pop_n_objs_reverse (SLang_Object_Type *x, unsigned int n)
    register SLang_Object_Type *y;
    unsigned int i;
 
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
    if (Run_Stack + n > y)
      {
@@ -369,20 +369,20 @@ static int pop_n_objs_reverse (SLang_Object_Type *x, unsigned int n)
 	y--;
 	x[i] = *y;
      }
-   Stack_Pointer = y;
+   Run_Stack_Stack_Pointer = y;
    return 0;
 }
 
 _INLINE_
 static int peek_at_stack (void)
 {
-   IF_UNLIKELY(Stack_Pointer == Run_Stack)
+   IF_UNLIKELY(Run_Stack_Stack_Pointer == Run_Stack)
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
 	return -1;
      }
 
-   return (int) (Stack_Pointer - 1)->o_data_type;
+   return (int) (Run_Stack_Stack_Pointer - 1)->o_data_type;
 }
 
 int SLang_peek_at_stack (void)
@@ -393,15 +393,15 @@ int SLang_peek_at_stack (void)
 int _pSLang_peek_at_stack2 (SLtype *_typep)
 {
    SLtype type;
-   if (Stack_Pointer == Run_Stack)
+   if (Run_Stack_Stack_Pointer == Run_Stack)
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
 	return -1;
      }
 
-   type = (Stack_Pointer - 1)->o_data_type;
+   type = (Run_Stack_Stack_Pointer - 1)->o_data_type;
    if (type == SLANG_ARRAY_TYPE)
-     *_typep = (Stack_Pointer - 1)->v.array_val->data_type;
+     *_typep = (Run_Stack_Stack_Pointer - 1)->v.array_val->data_type;
    else
      *_typep = type;
    return (int) type;
@@ -409,14 +409,14 @@ int _pSLang_peek_at_stack2 (SLtype *_typep)
 
 int SLang_peek_at_stack_n (unsigned int n)
 {
-   unsigned int stklen = (unsigned int)(Stack_Pointer - Run_Stack);
+   unsigned int stklen = (unsigned int)(Run_Stack_Stack_Pointer - Run_Stack);
 
-   if (n >= stklen)
+   IF_UNLIKELY(n >= stklen)
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
 	return -1;
      }
-   return (int) (Stack_Pointer - (n+1))->o_data_type;
+   return (int) (Run_Stack_Stack_Pointer - (n+1))->o_data_type;
 }
 
 static int pop_ctrl_integer (int *i)
@@ -429,7 +429,7 @@ static int pop_ctrl_integer (int *i)
    /* Most of the time, either an integer or a char will be on the stack.
     * Optimize these cases.
     */
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
    IF_UNLIKELY(y == Run_Stack)
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
@@ -440,13 +440,13 @@ static int pop_ctrl_integer (int *i)
    type = (int) y->o_data_type;
    if (type == SLANG_INT_TYPE)
      {
-	Stack_Pointer = y;
+	Run_Stack_Stack_Pointer = y;
 	*i = y->v.int_val;
 	return 0;
      }
    if (type == SLANG_CHAR_TYPE)
      {
-	Stack_Pointer = y;
+	Run_Stack_Stack_Pointer = y;
 	*i = y->v.char_val;
 	return 0;
      }
@@ -472,7 +472,7 @@ int SLang_peek_at_stack1_n (unsigned int n)
 
    type = SLang_peek_at_stack_n (n);
    if (type == SLANG_ARRAY_TYPE)
-     type = (Stack_Pointer - (n+1))->v.array_val->data_type;
+     type = (Run_Stack_Stack_Pointer - (n+1))->v.array_val->data_type;
 
    return type;
 }
@@ -510,24 +510,60 @@ void SLang_free_object (SLang_Object_Type *obj)
    free_object (obj, cl);
 }
 
+static int increase_stack_size (int min_amount)
+{
+   SLang_Object_Type *new_stack;
+   size_t stack_size, new_stack_size, stack_depth, frame_pointer_offset;
+
+   stack_depth = Run_Stack_Stack_Pointer - Run_Stack;
+   stack_size = Run_Stack_Stack_Pointer_Max - Run_Stack;
+   new_stack_size = stack_size + min_amount;
+   frame_pointer_offset = Run_Stack_Frame_Pointer - Run_Stack;
+
+   if (new_stack_size > SLANG_MAX_STACK_LEN)
+     {
+	SLang_verror (SL_STACK_OVERFLOW, "Maximum stack size exceeded");
+	return -1;
+     }
+   if (min_amount < SLANG_INITIAL_STACK_LEN)
+     {
+	new_stack_size = stack_size + SLANG_INITIAL_STACK_LEN;
+	if (new_stack_size > SLANG_MAX_STACK_LEN)
+	  new_stack_size = SLANG_MAX_STACK_LEN;
+     }
+
+   if (NULL == (new_stack = (SLang_Object_Type *)_SLrecalloc ((SLFUTURE_VOID *)Run_Stack, new_stack_size, sizeof(SLang_Object_Type))))
+     return -1;
+
+   memset (new_stack + stack_size, 0, (new_stack_size-stack_size)*sizeof(SLang_Object_Type));
+   Run_Stack = new_stack;
+   Run_Stack_Stack_Pointer = new_stack + stack_depth;
+   Run_Stack_Stack_Pointer_Max = new_stack + new_stack_size;
+
+   Run_Stack_Frame_Pointer = Run_Stack + frame_pointer_offset;
+
+   return 0;
+}
+
 _INLINE_ static int push_object (SLang_Object_Type *x)
 {
    register SLang_Object_Type *y;
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
    /* if there is a SLang_Error, probably not much harm will be done
     if it is ignored here */
    /* if (SLang_Error) return; */
 
    /* flag it now */
-   IF_UNLIKELY(y >= Stack_Pointer_Max)
+   IF_UNLIKELY(y >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	return -1;
+	if (-1 == increase_stack_size (1))
+	  return  -1;
+	y = Run_Stack_Stack_Pointer;
      }
 
    *y = *x;
-   Stack_Pointer = y + 1;
+   Run_Stack_Stack_Pointer = y + 1;
    return 0;
 }
 
@@ -540,36 +576,38 @@ int SLang_push (SLang_Object_Type *x)
 int SLclass_push_ptr_obj (SLtype type, VOID_STAR pval)
 {
    register SLang_Object_Type *y;
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
-   IF_UNLIKELY(y >= Stack_Pointer_Max)
+   IF_UNLIKELY(y >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	return -1;
+	if (-1 == increase_stack_size (1))
+	  return -1;
+	y = Run_Stack_Stack_Pointer;
      }
 
    y->o_data_type = type;
    y->v.ptr_val = pval;
 
-   Stack_Pointer = y + 1;
+   Run_Stack_Stack_Pointer = y + 1;
    return 0;
 }
 
 _INLINE_ static int push_int_object (SLtype type, int x)
 {
    register SLang_Object_Type *y;
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
-   IF_UNLIKELY(y >= Stack_Pointer_Max)
+   IF_UNLIKELY(y >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	return -1;
+	if (-1 == increase_stack_size (1))
+	  return -1;
+	y = Run_Stack_Stack_Pointer;
      }
 
    y->o_data_type = type;
    y->v.int_val = x;
 
-   Stack_Pointer = y + 1;
+   Run_Stack_Stack_Pointer = y + 1;
    return 0;
 }
 
@@ -579,18 +617,20 @@ _INLINE_ static int push_int_object (SLtype type, int x)
 _INLINE_ static int push_array_index (SLtype type, SLindex_Type x)
 {
    register SLang_Object_Type *y;
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
-   IF_UNLIKELY(y >= Stack_Pointer_Max)
+   IF_UNLIKELY(y >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	return -1;
+	if (-1 == increase_stack_size (1))
+	  return -1;
+
+	y = Run_Stack_Stack_Pointer;
      }
 
    y->o_data_type = type;
    y->v.index_val = x;
 
-   Stack_Pointer = y + 1;
+   Run_Stack_Stack_Pointer = y + 1;
    return 0;
 }
 #endif
@@ -604,20 +644,23 @@ int _pSLang_push_array (SLang_Array_Type *at, int free_array)
 {
    register SLang_Object_Type *y;
 
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
-   IF_UNLIKELY(y >= Stack_Pointer_Max)
+   IF_UNLIKELY(y >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	if (free_array) SLang_free_array (at);
-	return -1;
+	if (-1 == increase_stack_size (1))
+	  {
+	     if (free_array) SLang_free_array (at);
+	     return -1;
+	  }
+	y = Run_Stack_Stack_Pointer;
      }
 
    if (free_array == 0) at->num_refs++;
    y->o_data_type = SLANG_ARRAY_TYPE;
    y->v.ptr_val = (VOID_STAR)at;
 
-   Stack_Pointer = y + 1;
+   Run_Stack_Stack_Pointer = y + 1;
    return 0;
 }
 
@@ -625,18 +668,20 @@ int _pSLang_push_array (SLang_Array_Type *at, int free_array)
 _INLINE_ static int push_double_object (SLtype type, double x)
 {
    register SLang_Object_Type *y;
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
-   IF_UNLIKELY(y >= Stack_Pointer_Max)
+   IF_UNLIKELY(y >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	return -1;
+	if (-1 == increase_stack_size (1))
+	  return -1;
+
+	y = Run_Stack_Stack_Pointer;
      }
 
    y->o_data_type = type;
    y->v.double_val = x;
 
-   Stack_Pointer = y + 1;
+   Run_Stack_Stack_Pointer = y + 1;
    return 0;
 }
 
@@ -649,18 +694,20 @@ int SLclass_push_double_obj (SLtype type, double x)
 _INLINE_ static int push_char_object (SLtype type, char x)
 {
    register SLang_Object_Type *y;
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
 
-   IF_UNLIKELY(y >= Stack_Pointer_Max)
+   IF_UNLIKELY(y >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	return -1;
+	if (-1 == increase_stack_size (1))
+	  return -1;
+
+	y = Run_Stack_Stack_Pointer;
      }
 
    y->o_data_type = type;
    y->v.char_val = x;
 
-   Stack_Pointer = y + 1;
+   Run_Stack_Stack_Pointer = y + 1;
    return 0;
 }
 
@@ -672,6 +719,8 @@ int SLclass_push_char_obj (SLtype type, char x)
 /* This function is "fragile".  It is a helper routine and assumes that y is on the stack */
 static int _typecast_object_to_type (SLang_Object_Type *y, SLang_Object_Type *obj, SLtype type, int allow_arrays)
 {
+   size_t ofs = y - Run_Stack;
+
 #if SLANG_OPTIMIZE_FOR_SPEED
    /* This is an implicit typecast.  We do not want to typecast
     * floats to ints implicitly.
@@ -695,8 +744,10 @@ static int _typecast_object_to_type (SLang_Object_Type *y, SLang_Object_Type *ob
 	  return -1;
      }
 
-   /* Here, *y has been replaced by the object of the specified type */
-   *obj = *y;
+   /* Here, *y has been replaced by the object of the specified type.  But don't reference
+    * it directly in case the stack has been reallocated by the typecast function.
+    */
+   *obj = Run_Stack[ofs];
    return 0;
 }
 
@@ -706,23 +757,24 @@ _INLINE_
    SLang_Object_Type *y;
    SLang_Object_Type obj;
 
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
    IF_UNLIKELY(y == Run_Stack)
      return SLang_pop(&obj);	       /* let it fail */
    y--;
    if (y->o_data_type == SLANG_INT_TYPE)
      {
 	*i = y->v.int_val;
-	Stack_Pointer = y;
+	Run_Stack_Stack_Pointer = y;
 	return 0;
      }
    if (-1 == _typecast_object_to_type (y, &obj, SLANG_INT_TYPE, 0))
-     {
-	/* Stack_Pointer = y; */
-	return -1;
-     }
+     return -1;
+
    *i = obj.v.int_val;
-   Stack_Pointer = y;
+   /* After the typecast function, y may nolonger point to a valid stack since
+    * it may have been reallocated.
+    */
+   Run_Stack_Stack_Pointer--;
    return 0;
 }
 
@@ -736,23 +788,21 @@ int SLang_pop_array_index (SLindex_Type *i)
    SLang_Object_Type *y;
    SLang_Object_Type obj;
 
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
    if (y == Run_Stack)
      return SLang_pop (&obj);	       /* let it fail */
    y--;
    if (y->o_data_type == SLANG_ARRAY_INDEX_TYPE)
      {
 	*i = y->v.index_val;
-	Stack_Pointer = y;
+	Run_Stack_Stack_Pointer = y;
 	return 0;
      }
    if (-1 == _typecast_object_to_type (y, &obj, SLANG_ARRAY_INDEX_TYPE, 0))
-     {
-	/* Stack_Pointer = y; */
-	return -1;
-     }
+     return -1;
+
    *i = obj.v.index_val;
-   Stack_Pointer = y;
+   Run_Stack_Stack_Pointer--;	       /* do not use y here since the stack may have been reallocated */
    return 0;
 }
 
@@ -766,22 +816,20 @@ _INLINE_ static int pop_object_of_type (SLtype type, SLang_Object_Type *obj,
 {
    register SLang_Object_Type *y;
 
-   y = Stack_Pointer;
+   y = Run_Stack_Stack_Pointer;
    IF_UNLIKELY(y == Run_Stack)
      return SLang_pop(obj);	       /* let it fail */
    y--;
    if (y->o_data_type == type)
      {
 	*obj = *y;
-	Stack_Pointer = y;
+	Run_Stack_Stack_Pointer = y;
 	return 0;
      }
    if (-1 == _typecast_object_to_type (y, obj, type, allow_arrays))
-     {
-	/* Stack_Pointer = y; */
-	return -1;
-     }
-   Stack_Pointer = y;
+     return -1;
+
+   Run_Stack_Stack_Pointer--;	       /* do not use y here since the stack may have been reallocated */
    return 0;
 }
 
@@ -811,7 +859,7 @@ int SLreverse_stack (int n)
 {
    SLang_Object_Type *otop, *obot, tmp;
 
-   otop = Stack_Pointer;
+   otop = Run_Stack_Stack_Pointer;
    if ((n > otop - Run_Stack) || (n < 0))
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
@@ -827,7 +875,7 @@ int SLreverse_stack (int n)
 	otop--;
 	obot++;
      }
-   return (int) ((Stack_Pointer - n) - Run_Stack);
+   return (int) ((Run_Stack_Stack_Pointer - n) - Run_Stack);
 }
 
 /* _INLINE_ */
@@ -838,7 +886,7 @@ static int roll_stack (int np)
 
    if ((n = abs(np)) <= 1) return 0;    /* identity */
 
-   obot = otop = Stack_Pointer;
+   obot = otop = Run_Stack_Stack_Pointer;
    i = n;
    while (i != 0)
      {
@@ -886,15 +934,15 @@ int SLstack_exch (unsigned int a, unsigned int b)
 {
    SLang_Object_Type *ap, *bp;
    SLang_Object_Type tmp;
-   unsigned int stklen = (unsigned int)(Stack_Pointer - Run_Stack);
+   unsigned int stklen = (unsigned int)(Run_Stack_Stack_Pointer - Run_Stack);
 
    if ((a >= stklen) || (b >= stklen))
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
 	return -1;
      }
-   ap = Stack_Pointer - (a+1);
-   bp = Stack_Pointer - (b+1);
+   ap = Run_Stack_Stack_Pointer - (a+1);
+   bp = Run_Stack_Stack_Pointer - (b+1);
 
    tmp = *ap;
    *ap = *bp;
@@ -905,45 +953,47 @@ int SLstack_exch (unsigned int a, unsigned int b)
 
 int SLstack_depth (void)
 {
-   return (int) (Stack_Pointer - Run_Stack);
+   return (int) (Run_Stack_Stack_Pointer - Run_Stack);
 }
 
 int SLdup_n (int n)
 {
-   SLang_Object_Type *bot, *top;
+   int itop, ibot;
 
    if (n <= 0)
      return 0;
 
-   top = Stack_Pointer;
-   if (top < Run_Stack + n)
+   itop = Run_Stack_Stack_Pointer - Run_Stack;
+   if (itop < n)
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
 	return -1;
      }
-   if (top + n > Stack_Pointer_Max)
+   if (Run_Stack_Stack_Pointer + n >= Run_Stack_Stack_Pointer_Max)
      {
-	(void) SLang_set_error (SL_STACK_OVERFLOW);
-	return -1;
+	if (-1 == increase_stack_size (n))
+	  return -1;
      }
-   bot = top - n;
+   ibot = itop - n;
 
-   while (bot < top)
+   while (ibot < itop)
      {
 	SLang_Class_Type *cl;
+	SLang_Object_Type *bot = Run_Stack + ibot;
 	SLtype data_type = bot->o_data_type;
 
 #if SLANG_OPTIMIZE_FOR_SPEED
 	if (SLANG_CLASS_TYPE_SCALAR == GET_CLASS_TYPE(data_type))
 	  {
-	     *Stack_Pointer++ = *bot++;
+	     *Run_Stack_Stack_Pointer++ = *bot;
+	     ibot++;
 	     continue;
 	  }
 #endif
 	GET_CLASS(cl,data_type);
 	if (-1 == (*cl->cl_push) (data_type, (VOID_STAR) &bot->v))
 	  return -1;
-	bot++;
+	ibot++;
      }
    return 0;
 }
@@ -1091,7 +1141,25 @@ static int set_qualifier (void)
    return SLang_pop_struct (&Next_Function_Qualifiers);
 }
 
-/* This function is called from slang code */
+int _pSLang_set_qualifiers (SLang_Struct_Type *q)
+{
+   /* For efficiency, skip the push_struct/set_qualifier step */
+   if (Next_Function_Qualifiers != NULL)
+     SLang_free_struct (Next_Function_Qualifiers);
+   if (q != NULL) q->num_refs++;
+   Next_Function_Qualifiers = q;
+   return 0;
+}
+
+int _pSLang_get_qualifiers (SLang_Struct_Type **qp)
+{
+   SLang_Struct_Type *q = Function_Qualifiers;
+   if (q != NULL) q->num_refs++;
+   *qp = q;
+   return 0;
+}
+
+/* This function is called from slang code by the __qualifiers function */
 int _pSLang_get_qualifiers_intrin (SLang_Struct_Type **qp)
 {
    /* The assumption is that this is being called from a function one level up.
@@ -1257,8 +1325,8 @@ static int start_arg_list (void)
 {
    IF_LIKELY(Frame_Pointer_Depth < SLANG_MAX_RECURSIVE_DEPTH)
      {
-	Frame_Pointer_Stack [Frame_Pointer_Depth] = (unsigned int) (Frame_Pointer - Run_Stack);
-	Frame_Pointer = Stack_Pointer;
+	Frame_Pointer_Stack [Frame_Pointer_Depth] = (unsigned int) (Run_Stack_Frame_Pointer - Run_Stack);
+	Run_Stack_Frame_Pointer = Run_Stack_Stack_Pointer;
 	Frame_Pointer_Depth++;
 	Next_Function_Num_Args = 0;
 	return 0;
@@ -1277,13 +1345,13 @@ int _pSLang_restart_arg_list (int nargs)
 {
    if (Frame_Pointer_Depth < SLANG_MAX_RECURSIVE_DEPTH)
      {
-	if ((nargs < 0) || (Run_Stack + nargs > Stack_Pointer))
+	if ((nargs < 0) || (Run_Stack + nargs > Run_Stack_Stack_Pointer))
 	  {
 	     _pSLang_verror (SL_Internal_Error, "restart_arg_list: stack underflow");
 	     return -1;
 	  }
-	Frame_Pointer_Stack [Frame_Pointer_Depth] = (unsigned int) (Frame_Pointer - Run_Stack);
-	Frame_Pointer = Stack_Pointer - nargs;
+	Frame_Pointer_Stack [Frame_Pointer_Depth] = (unsigned int) (Run_Stack_Frame_Pointer - Run_Stack);
+	Run_Stack_Frame_Pointer = Run_Stack_Stack_Pointer - nargs;
 	Frame_Pointer_Depth++;
 	Next_Function_Num_Args = 0;
 	return 0;
@@ -1303,8 +1371,8 @@ _INLINE_ static int end_arg_list (void)
    Frame_Pointer_Depth--;
    if (Frame_Pointer_Depth < SLANG_MAX_RECURSIVE_DEPTH)
      {
-	Next_Function_Num_Args = (int) (Stack_Pointer - Frame_Pointer);
-	Frame_Pointer = Run_Stack + Frame_Pointer_Stack [Frame_Pointer_Depth];
+	Next_Function_Num_Args = (int) (Run_Stack_Stack_Pointer - Run_Stack_Frame_Pointer);
+	Run_Stack_Frame_Pointer = Run_Stack + Frame_Pointer_Stack [Frame_Pointer_Depth];
      }
    return 0;
 }
@@ -1481,7 +1549,10 @@ static int int_int_binary_result (int op, SLang_Object_Type *obja, SLang_Object_
 	     SLang_set_error (SL_DIVIDE_ERROR);
 	     return -1;
 	  }
-	objc->v.int_val = a/b;  objc->o_data_type = SLANG_INT_TYPE;
+	if (b == -1) objc->v.int_val = -a;
+	else
+	  objc->v.int_val = a/b;
+	objc->o_data_type = SLANG_INT_TYPE;
 	return 0;
       case SLANG_MOD:
 	if (b == 0)
@@ -1489,7 +1560,10 @@ static int int_int_binary_result (int op, SLang_Object_Type *obja, SLang_Object_
 	     SLang_set_error (SL_DIVIDE_ERROR);
 	     return -1;
 	  }
-	objc->v.int_val = a % b;  objc->o_data_type = SLANG_INT_TYPE;
+	if (b == -1) objc->v.int_val = 0;
+	else
+	  objc->v.int_val = a % b;
+	objc->o_data_type = SLANG_INT_TYPE;
 	return 0;
 
       case SLANG_BAND:
@@ -1552,6 +1626,7 @@ static int int_int_binary (int op, SLang_Object_Type *obja, SLang_Object_Type *o
 	     SLang_set_error (SL_DIVIDE_ERROR);
 	     return -1;
 	  }
+	else if (b == -1) return push_int_object (SLANG_INT_TYPE, -a);
 	return push_int_object (SLANG_INT_TYPE, a/b);
       case SLANG_MOD:
 	if (b == 0)
@@ -1559,6 +1634,7 @@ static int int_int_binary (int op, SLang_Object_Type *obja, SLang_Object_Type *o
 	     SLang_set_error (SL_DIVIDE_ERROR);
 	     return -1;
 	  }
+	if (b == -1) return push_int_object (SLANG_INT_TYPE, 0);
 	return push_int_object (SLANG_INT_TYPE, a%b);
 
       case SLANG_BAND:
@@ -1810,6 +1886,7 @@ static int do_binary_ab_inc_ref (int op, SLang_Object_Type *obja, SLang_Object_T
 		       SLang_set_error (SL_DIVIDE_ERROR);
 		       return -1;
 		    }
+		  if (b == -1) return push_int_object (SLANG_INT_TYPE, -a);
 		  return push_int_object (SLANG_INT_TYPE, a/b);
 		case SLANG_MOD:
 		  if (b == 0)
@@ -1817,6 +1894,7 @@ static int do_binary_ab_inc_ref (int op, SLang_Object_Type *obja, SLang_Object_T
 		       SLang_set_error (SL_DIVIDE_ERROR);
 		       return -1;
 		    }
+		  if (b == -1) return push_int_object (SLANG_INT_TYPE, 0);
 		  return push_int_object (SLANG_INT_TYPE, a%b);
 
 		case SLANG_BAND:
@@ -2030,7 +2108,7 @@ static int do_binary (int op)
 #endif
    int ret;
 
-   objbp = Stack_Pointer;
+   objbp = Run_Stack_Stack_Pointer;
    if (Run_Stack + 2 > objbp)
      {
 	(void) SLang_set_error (SL_STACK_UNDERFLOW);
@@ -2040,7 +2118,7 @@ static int do_binary (int op)
    objbp--;
    objap = objbp-1;
 
-   Stack_Pointer = objap;
+   Run_Stack_Stack_Pointer = objap;
 #if SLANG_OPTIMIZE_FOR_SPEED
    if (objbp->o_data_type == objap->o_data_type)
      {
@@ -2125,12 +2203,12 @@ static void do_binary_b_inc_ref (int op, SLang_Object_Type *objbp)
 
    if (btype == SLANG_INT_TYPE)
      {
-	if (Stack_Pointer == Run_Stack)
+	if (Run_Stack_Stack_Pointer == Run_Stack)
 	  {
 	     (void) SLang_set_error (SL_STACK_UNDERFLOW);
 	     return;
 	  }
-	objap = (Stack_Pointer-1);
+	objap = (Run_Stack_Stack_Pointer-1);
 	atype = objap->o_data_type;
 
 	if (atype == SLANG_INT_TYPE)
@@ -2206,12 +2284,12 @@ static void do_binary_b_inc_ref (int op, SLang_Object_Type *objbp)
      {
 	double a, b;
 
-	if (Stack_Pointer == Run_Stack)
+	if (Run_Stack_Stack_Pointer == Run_Stack)
 	  {
 	     (void) SLang_set_error (SL_STACK_UNDERFLOW);
 	     return;
 	  }
-	objap = (Stack_Pointer-1);
+	objap = (Run_Stack_Stack_Pointer-1);
 	atype = objap->o_data_type;
 
 	if (atype == SLANG_DOUBLE_TYPE)
@@ -2728,6 +2806,7 @@ static int make_unit_object (SLang_Object_Type *a, SLang_Object_Type *u)
 
       case SLANG_COMPLEX_TYPE:
 	u->o_data_type = SLANG_DOUBLE_TYPE;
+	/* fall through */
       case SLANG_DOUBLE_TYPE:
 	u->v.double_val = 1;
 	break;
@@ -3494,12 +3573,12 @@ static int execute_intrinsic_fun (SLang_Intrin_Fun_Type *objf)
    SLtype ret_type;
    unsigned int argc;
    unsigned int i;
-   FVOID_STAR fptr;
+   SLFvoid_Star fptr;
    SLtype *arg_types;
    int stk_depth;
    int num_args;
 
-   fptr = objf->i_fun;
+   fptr = (SLFvoid_Star)objf->i_fun;
    argc = objf->num_args;
    ret_type = objf->return_type;
    arg_types = objf->arg_types;
@@ -3531,7 +3610,7 @@ static int execute_intrinsic_fun (SLang_Intrin_Fun_Type *objf)
 	if (stk_depth >= 0)
 	  trace_dump (">>%s (%d args)\n",
 		      (char *) objf->name,
-		      Stack_Pointer - nargs,
+		      Run_Stack_Stack_Pointer - nargs,
 		      nargs,
 		      1);
      }
@@ -3669,7 +3748,7 @@ static int execute_intrinsic_fun (SLang_Intrin_Fun_Type *objf)
 
 	trace_dump ("<<%s (returning %d values)\n",
 		      (char *) objf->name,
-		      Stack_Pointer - stk_depth,
+		      Run_Stack_Stack_Pointer - stk_depth,
 		      stk_depth,
 		      1);
      }
@@ -3741,7 +3820,7 @@ lang_do_loops (int stype, SLBlock_Type *block, unsigned int num_blocks)
       case SLANG_BCST_FOREACH_EARGS:
 	if (-1 == end_arg_list ())
 	  goto return_error;
-	/* drop */
+	/* fall through */
       case SLANG_BCST_FOREACH:	       /* obsolete */
 	loop_name = "foreach";
 	if (num_blocks != 1)
@@ -3997,7 +4076,7 @@ lang_do_loops (int stype, SLBlock_Type *block, unsigned int num_blocks)
    wrong_num_blocks_error:
    _pSLang_verror (SL_SYNTAX_ERROR, "Wrong number of blocks for '%s' construct", loop_name);
 
-   /* drop */
+   /* fall through */
    return_error:
    return -1;
    /* do_traceback (loop_name, NULL, -1); */
@@ -4283,7 +4362,7 @@ static int do_compare (SLBlock_Type *ops1)
 	  }
      }
    ret = 0;
-   /* drop */
+   /* fall through */
    return_error:
    if (cp != NULL)
      SLang_free_object (cp);
@@ -4579,7 +4658,7 @@ static void execute_slang_fun (_pSLang_Function_Type *fun, unsigned int linenum)
 	     stack_depth = SLstack_depth () - stack_depth;
 
 	     trace_dump ("<<%s (returning %d values)\n", (char *) fun->name,
-			 Stack_Pointer - stack_depth,
+			 Run_Stack_Stack_Pointer - stack_depth,
 			 stack_depth,
 			 1);
 
@@ -4766,6 +4845,11 @@ static int carefully_push_object (SLang_Object_Type *obj)
    SLtype subtype;
 
    subtype = obj->o_data_type;
+   IF_UNLIKELY (subtype == 0)
+     {
+	SLang_set_error (SL_VariableUninitialized_Error);
+	return -1;
+     }
 
    GET_CLASS(cl,subtype);
 
@@ -4783,11 +4867,11 @@ static int carefully_push_object (SLang_Object_Type *obj)
 
 int _pSLslang_copy_obj (SLang_Object_Type *obja, SLang_Object_Type *objb)
 {
+#if SLANG_OPTIMIZE_FOR_SPEED
    SLtype type;
 
    type = obja->o_data_type;
 
-#if SLANG_OPTIMIZE_FOR_SPEED
    if (SLANG_CLASS_TYPE_SCALAR == GET_CLASS_TYPE(type))
      {
 	*objb = *obja;
@@ -5278,7 +5362,7 @@ int _pSLpush_dollar_string (SLFUTURE_CONST char *str)
      }
 
    status = _pSLstrops_do_sprintf_n (argc-1);
-   /* drop */
+   /* fall through */
 
    free_return:
    for (i = 0; i < argc; i++)
@@ -5886,7 +5970,7 @@ static int inner_interp (SLBlock_Type *addr_start)
 			    break;
 			 }
 		    }
-		  /* drop */
+		  /* fall through */
 		case SLANG_BCST_ANDELSE:
 		  if (block == NULL) block = addr;
 		  lang_do_and_orelse (0, block, addr);
@@ -5904,7 +5988,7 @@ static int inner_interp (SLBlock_Type *addr_start)
 			    break;
 			 }
 		    }
-		  /* drop */
+		  /* fall through */
 		case SLANG_BCST_ORELSE:
 		  if (block == NULL) block = addr;
 		  lang_do_and_orelse (1, block, addr);
@@ -6067,7 +6151,7 @@ static int inner_interp (SLBlock_Type *addr_start)
 	   case SLANG_BC_CALL_DIRECT_RETINTR:
 	     (*addr->b.call_function) ();
 	     addr++;
-	     /* drop */
+	     /* fall through */
 	   case SLANG_BC_RET_INTRINSIC:
 	     EXECUTE_INTRINSIC (addr)
 	     if (0 == Handle_Interrupt)
@@ -6355,7 +6439,7 @@ static int inner_interp (SLBlock_Type *addr_start)
 	     if (-1 == push_local_variable (addr->b.i_blk))
 	       break;
 	     addr++;
-	     /* drop */
+	     /* fall through */
 	   case SLANG_BC_LVARIABLE_APUT1:
 	       {
 		  SLang_Object_Type *o;
@@ -6547,7 +6631,7 @@ static int inner_interp (SLBlock_Type *addr_start)
 		  if (-1 == push_object (&obj3))
 		    break;
 	       }
-	     /* drop */
+	     /* fall through */
 	   case SLANG_BC_IF_BLOCK:
 	       {
 		  int i;
@@ -6861,7 +6945,7 @@ static int lang_free_branch (SLBlock_Type *p)
 	   case SLANG_BC_COMBINED:
 	     if (0 == (p->bc_flags & BC_LITERAL_MASK))
 	       break;
-	     /* drop */
+	     /* fall through */
 	   case SLANG_BC_LITERAL:
 	   case SLANG_BC_LITERAL_STR:
 	   case SLANG_BC_LITERAL_DBL:
@@ -7103,7 +7187,7 @@ int _pSLcompile_push_context (SLang_Load_Type *load_object)
 
    (void) _pSLerr_suspend_messages ();
    status = 0;
-   /* drop */
+   /* fall through */
 
    free_return:
    if (free_name)
@@ -8497,6 +8581,12 @@ static int lang_define_function (SLFUTURE_CONST char *name, unsigned char type, 
 	return -1;
      }
    Compile_ByteCode_Ptr = This_Compile_Block;
+
+#if SLANG_HAS_DEBUG_CODE && SLANG_HAS_BOSEOS
+   if (h->issue_bofeof_info
+       && (-1 == _pSLcall_bof_compile_hook (h->file, name)))
+     return -1;
+#endif
    return 0;
 }
 
@@ -8765,7 +8855,7 @@ void SLang_restart (int localv)
 	/* The validity of this step needs to be reexamined in the context
 	 * of the new exception handling for slang 2
 	 */
-	while (Stack_Pointer != Run_Stack)
+	while (Run_Stack_Stack_Pointer != Run_Stack)
 	  {
 	     SLdo_pop ();
 	  }
@@ -10131,7 +10221,8 @@ static void compile_basic_token_mode (_pSLang_Token_Type *t)
 #endif
       case BOS_TOKEN:
 #if SLANG_HAS_DEBUG_CODE && SLANG_HAS_BOSEOS
-	compile_line_info (SLANG_BC_BOS, This_Compile_Filename, t->v.long_val);
+	if (0 == _pSLcall_bos_compile_hook (This_Compile_Filename, t->v.long_val))
+	  compile_line_info (SLANG_BC_BOS, This_Compile_Filename, t->v.long_val);
 #endif
 	break;
       case EOS_TOKEN:
@@ -10417,7 +10508,7 @@ static void delete_interpreter (void)
    if (Run_Stack != NULL)
      {
 	/* Allow any object destructors to run */
-	while (Stack_Pointer != Run_Stack)
+	while (Run_Stack_Stack_Pointer != Run_Stack)
 	  {
 	     SLdo_pop ();
 	  }
@@ -10450,13 +10541,8 @@ static int init_interpreter (void)
      return -1;
    Global_NameSpace = ns;
 
-   Run_Stack = (SLang_Object_Type *) SLcalloc (SLANG_MAX_STACK_LEN,
-						  sizeof (SLang_Object_Type));
-   if (Run_Stack == NULL)
-     goto return_error;
-
-   Stack_Pointer = Run_Stack;
-   Stack_Pointer_Max = Run_Stack + SLANG_MAX_STACK_LEN;
+   if (-1 == increase_stack_size (SLANG_INITIAL_STACK_LEN))
+     return -1;
 
    Num_Args_Stack = (int *) _SLcalloc (SLANG_MAX_RECURSIVE_DEPTH, sizeof(int));
    if (Num_Args_Stack == NULL)
@@ -10467,7 +10553,6 @@ static int init_interpreter (void)
    if (Frame_Pointer_Stack == NULL)
      goto return_error;
    Frame_Pointer_Depth = 0;
-   Frame_Pointer = Run_Stack;
 
    Local_Variable_Stack = (SLang_Object_Type *) _SLcalloc (SLANG_MAX_LOCAL_STACK, sizeof(SLang_Object_Type));
    if (Local_Variable_Stack == NULL)
@@ -10925,22 +11010,12 @@ SLCONST char *_pSLang_current_function_name (void)
    return Current_Function->name;
 }
 
-SLang_Object_Type *_pSLang_get_run_stack_pointer (void)
-{
-   return Stack_Pointer;
-}
-
-SLang_Object_Type *_pSLang_get_run_stack_base (void)
-{
-   return Run_Stack;
-}
-
 int _pSLang_dump_stack (void) /*{{{*/
 {
    char buf[32];
    unsigned int n;
 
-   n = (unsigned int) (Stack_Pointer - Run_Stack);
+   n = (unsigned int) (Run_Stack_Stack_Pointer - Run_Stack);
    while (n)
      {
 	n--;

@@ -1,6 +1,6 @@
 /* Array manipulation routines for S-Lang */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -22,6 +22,7 @@ USA.
 
 #include "slinclud.h"
 #include <math.h>
+#include <limits.h>
 
 /* #define SL_APP_WANTS_FOREACH */
 #include "slang.h"
@@ -61,7 +62,7 @@ static int pop_array (SLang_Array_Type **at_ptr, int convert_scalar)
 
       case SLANG_NULL_TYPE:
 	/* convert_scalar = 0; */  /* commented out for 2.0.5 to fix array_map NULL bug */
-	/* drop */
+	/* fall through */
       default:
 	if (convert_scalar == 0)
 	  {
@@ -123,19 +124,18 @@ static VOID_STAR linear_get_data_addr (SLang_Array_Type *at, SLindex_Type *dims)
 	ofs = 0;
 	for (i = 0; i < num_dims; i++)
 	  {
-	     size_t new_ofs;
 	     SLindex_Type d = dims[i];
-	     if (d < 0)
-	       d = d + max_dims[i];
-
-	     new_ofs = ofs * (size_t)max_dims [i] + (size_t) d;
-	     if ((max_dims[i] != 0)
-		 && ((new_ofs - (size_t)d)/max_dims[i] != ofs))
+	     if ((d < 0) || (d >= max_dims[i]))
 	       {
-		  throw_size_error (SL_Index_Error);
-		  return NULL;
+		  if (d < 0)
+		    d = d + max_dims[i];
+		  if ((d < 0) || (d >= max_dims[i]))
+		    {
+		       SLang_set_error (SL_Index_Error);
+		       return NULL;
+		    }
 	       }
-	     ofs = new_ofs;
+	     ofs = ofs * (size_t)max_dims [i] + (size_t) d;
 	  }
      }
    if (ofs >= at->num_elements)
@@ -231,7 +231,8 @@ static int new_object_element (SLang_Array_Type *at,
    return (*at->cl->cl_init_array_object) (at->data_type, data);
 }
 
-int _pSLarray_next_index (SLindex_Type *dims, SLindex_Type *max_dims, unsigned int num_dims)
+static int next_index (SLindex_Type *dims, SLindex_Type *max_dims,
+		       unsigned int num_dims, unsigned int *changed_indexp)
 {
    while (num_dims)
      {
@@ -240,15 +241,22 @@ int _pSLarray_next_index (SLindex_Type *dims, SLindex_Type *max_dims, unsigned i
 	num_dims--;
 
 	dims_i = dims [num_dims] + 1;
-	if (dims_i < (int) max_dims [num_dims])
+	if (dims_i < (SLindex_Type) max_dims [num_dims])
 	  {
 	     dims [num_dims] = dims_i;
+	     *changed_indexp = num_dims;
 	     return 0;
 	  }
 	dims [num_dims] = 0;
      }
 
    return -1;
+}
+
+int _pSLarray_next_index (SLindex_Type *dims, SLindex_Type *max_dims, unsigned int num_dims)
+{
+   unsigned int changed_index;
+   return next_index (dims, max_dims, num_dims, &changed_index);
 }
 
 static int do_method_for_all_elements (SLang_Array_Type *at,
@@ -259,7 +267,7 @@ static int do_method_for_all_elements (SLang_Array_Type *at,
 {
    SLindex_Type dims [SLARRAY_MAX_DIMS];
    SLindex_Type *max_dims;
-   unsigned int num_dims;
+   unsigned int num_dims, changed_index;
 
    if (at->num_elements == 0)
      return 0;
@@ -274,7 +282,7 @@ static int do_method_for_all_elements (SLang_Array_Type *at,
 	if (-1 == (*method) (at, dims, client_data))
 	  return -1;
      }
-   while (0 == _pSLarray_next_index (dims, max_dims, num_dims));
+   while (0 == next_index (dims, max_dims, num_dims, &changed_index));
 
    return 0;
 }
@@ -310,6 +318,26 @@ static void free_array (SLang_Array_Type *at)
 void SLang_free_array (SLang_Array_Type *at)
 {
    free_array (at);
+}
+
+/* Here, a and b are assumed to be non-negative */
+static int check_overflow_mult_i (SLindex_Type a, SLindex_Type b, SLindex_Type *cp)
+{
+   if ((a < 0) || (b < 0) || ((b > 0) && (a > INT_MAX/b)))
+     return -1;
+
+   *cp = a*b;
+
+   return 0;
+}
+
+static int check_overflow_mult_ui (SLuindex_Type a, SLindex_Type b, SLuindex_Type *cp)
+{
+   if ((b < 0) || ((b > 0) && (a > UINT_MAX/(SLuindex_Type)b)))
+     return -1;
+
+   *cp = a*(SLuindex_Type)b;
+   return 0;
 }
 
 SLang_Array_Type *
@@ -366,16 +394,14 @@ SLang_create_array1 (SLtype type, int read_only, VOID_STAR data,
    num_elements = 1;
    for (i = 0; i < num_dims; i++)
      {
-	SLindex_Type new_num_elements;
 	at->dims[i] = dims[i];
-	new_num_elements = dims[i] * num_elements;
-	if (dims[i] && (new_num_elements/dims[i] != num_elements))
+
+	if (-1 == check_overflow_mult_i (num_elements, dims[i], &num_elements))
 	  {
 	     throw_size_error (SL_Index_Error);
 	     free_array (at);
 	     return NULL;
 	  }
-	num_elements = new_num_elements;
      }
 
    /* Now set the rest of the unused dimensions to 1.  This makes it easier
@@ -395,10 +421,12 @@ SLang_create_array1 (SLtype type, int read_only, VOID_STAR data,
 	return at;
      }
 
-   size = (num_elements * sizeof_type);
-   if ((size/sizeof_type != num_elements) || (size < 0))
+   /* SLmalloc is currently limited to the use of unsigned integers.
+    * So include the size of the type as well.
+    */
+   if (-1 == check_overflow_mult_i (num_elements, sizeof_type, &size))
      {
-	throw_size_error (SL_INVALID_PARM);
+	throw_size_error (SL_Index_Error);
 	free_array (at);
 	return NULL;
      }
@@ -563,7 +591,7 @@ static int coerse_array_to_linear (SLang_Array_Type *at)
      }
 
    imax = at->num_elements;
-   
+
    vdata = (VOID_STAR) _SLcalloc (imax, at->sizeof_type);
    if (vdata == NULL)
      return -1;
@@ -587,6 +615,13 @@ free_index_objects (SLang_Object_Type *index_objs, unsigned int num_indices)
 	  SLang_free_object (obj);
      }
 }
+
+static void do_index_error (SLuindex_Type i, SLindex_Type n)
+{
+   _pSLang_verror (SL_Index_Error, "Array index %lu out of allowed range 0<=index<%ld",
+		 (unsigned long)i, (long)n);
+}
+
 
 /* If *is_index_array!=0, then only one index object is returned, which is
  * to index all the elements, and not just a single dimension.
@@ -655,6 +690,7 @@ pop_indices (unsigned num_dims, SLindex_Type *dims, SLuindex_Type num_elements,
 		  SLindex_Type first_index, last_index;
 		  SLindex_Type delta = r->delta;
 		  SLindex_Type n;
+		  int ok = 1;
 
 		  if (num_indices == 1)/* could be index array */
 		    n = (SLindex_Type)num_elements;
@@ -666,15 +702,27 @@ pop_indices (unsigned num_dims, SLindex_Type *dims, SLuindex_Type num_elements,
 		       /* Case 3 */
 		       first_index = r->first_index;
 		       if (first_index < 0) first_index += n;
-		       if (delta > 0) last_index = n-1; else last_index = 0;
+		       if (delta > 0)
+			 {
+			    last_index = n-1;   /* [-i:n-1] not ok */
+			    ok = (first_index >= 0);
+			 }
+		       else
+			 last_index = 0;   /* [-i:0:-1] ==> empty array, which is ok */
 		    }
 		  else if (r->has_last_index)
 		    {
 		       /* case 2 */
-		       if (delta > 0) first_index = 0; else first_index = n-1;
 		       last_index = r->last_index;
 		       if (last_index < 0)
 			 last_index += n;
+		       if (delta > 0)
+			 first_index = 0;   /* [0:-i:1] ==> empty, which is ok */
+		       else
+			 {
+			    first_index = n-1;
+			    ok = (last_index >= 0);   /* [n:-i: -1]  not ok */
+			 }
 		    }
 		  else
 		    {
@@ -689,6 +737,12 @@ pop_indices (unsigned num_dims, SLindex_Type *dims, SLuindex_Type num_elements,
 			    first_index = n-1;
 			    last_index = 0;
 			 }
+		    }
+
+		  if (!ok)
+		    {
+		       do_index_error (i, n);
+		       goto return_error;
 		    }
 
 		  if (NULL == (new_at = inline_implicit_index_array (&first_index, &last_index, &delta)))
@@ -709,12 +763,6 @@ pop_indices (unsigned num_dims, SLindex_Type *dims, SLuindex_Type num_elements,
    return_error:
    free_index_objects (index_objs, num_indices);
    return -1;
-}
-
-static void do_index_error (SLuindex_Type i, SLindex_Type indx, SLindex_Type dim)
-{
-   _pSLang_verror (SL_Index_Error, "Array index %lu (value=%ld) out of allowed range 0<=index<%ld",
-		 (unsigned long)i, (long)indx, (long)dim);
 }
 
 int _pSLarray_pop_index (unsigned int num_elements, SLang_Array_Type **ind_atp, SLindex_Type *ind)
@@ -870,6 +918,47 @@ aget_transfer_n_elems (SLang_Array_Type *at, SLuindex_Type num, SLindex_Type *st
    return 0;
 }
 
+#define CHECK_INDEX(_i,_n,_then) \
+   if ((_i) < 0) \
+   { \
+      (_i) += (_n); \
+      if ((_i) < 0) (_i) = (_n); \
+   } \
+   if ((_i) >= (_n)) \
+   { \
+      do_index_error((_i),(_n)); \
+      _then; \
+   }(void)0
+
+/* Check that 0 <= | idx, idx + 1*delta, ..., idx + jmax-1 | <= num_elements
+ * If jmax == 0, then there are no indices to check.
+ */
+static int check_range_indices (SLindex_Type idx, SLindex_Type delta, SLindex_Type jmax,
+				SLindex_Type num_elements, int *isposp)
+{
+   SLindex_Type idx_0, idx_1;
+
+   if (jmax == 0)
+     {
+	if (isposp != NULL) *isposp = 1;
+	return 0;
+     }
+
+   idx_0 = idx;
+   idx_1 = idx + delta*(jmax-1);
+
+   if ((idx_0 >= num_elements) || (idx_1 >= num_elements))
+     {
+	SLang_set_error (SL_Index_Error);
+	return -1;
+     }
+
+   if (isposp != NULL) *isposp = (idx_0 >= 0) && (idx_1 >= 0);
+   CHECK_INDEX(idx_0, num_elements, return -1);
+   CHECK_INDEX(idx_1, num_elements, return -1);
+   return 0;
+}
+
 #if SLANG_OPTIMIZE_FOR_SPEED
 # if SLANG_HAS_FLOAT
 #  define GENERIC_TYPE double
@@ -921,22 +1010,15 @@ static int aget_generic_from_index_array (SLang_Array_Type *at,
 	SLindex_Type idx = r->first_index, delta = r->delta;
 	SLuindex_Type j, jmax = at_ind->num_elements;
 
+	if (-1 == check_range_indices (idx, delta, jmax, num_elements, NULL))
+	  return -1;
+
 	for (j = 0; j < jmax; j++)
 	  {
 	     size_t offset;
 	     SLindex_Type i = idx;
 
-	     if (i < 0)
-	       {
-		  i += num_elements;
-		  if (i < 0)
-		    i = num_elements;
-	       }
-	     if (i >= num_elements)
-	       {
-		  SLang_set_error (SL_Index_Error);
-		  return -1;
-	       }
+	     if (i < 0) i += num_elements;
 	     offset = sizeof_type * (SLuindex_Type)i;
 	     if (-1 == transfer_n_elements (at, (VOID_STAR) dest_data,
 					    (VOID_STAR) (src_data + offset),
@@ -946,6 +1028,7 @@ static int aget_generic_from_index_array (SLang_Array_Type *at,
 	     dest_data += sizeof_type;
 	     idx += delta;
 	  }
+
 	return 0;
      }
 
@@ -957,18 +1040,7 @@ static int aget_generic_from_index_array (SLang_Array_Type *at,
 	size_t offset;
 	SLindex_Type i = *indices;
 
-	if (i < 0)
-	  {
-	     i += num_elements;
-	     if (i < 0)
-	       i = num_elements;
-	  }
-	if (i >= num_elements)
-	  {
-	     SLang_set_error (SL_Index_Error);
-	     return -1;
-	  }
-
+	CHECK_INDEX(i, num_elements, return -1);
 	offset = sizeof_type * (SLuindex_Type)i;
 	if (-1 == transfer_n_elements (at, (VOID_STAR) dest_data,
 				       (VOID_STAR) (src_data + offset),
@@ -1050,7 +1122,7 @@ aget_from_index_array (SLang_Array_Type *at, SLang_Array_Type *ind_at)
 
       case SLANG_LONG_TYPE:
       case SLANG_ULONG_TYPE:
-	/* drop */
+	/* fall through */
 # if LONG_IS_NOT_INT
 	if (-1 == aget_longs_from_index_array ((long *)src_data, num_elements,
 					      ind_at, is_range, (long *)new_data))
@@ -1063,7 +1135,7 @@ aget_from_index_array (SLang_Array_Type *at, SLang_Array_Type *ind_at)
 					      ind_at, is_range, (int *)new_data))
 	  goto return_error;
 	break;
-#endif
+#endif				       /* SLANG_OPTIMIZE_FOR_SPEED */
       default:
 	if (-1 == aget_generic_from_index_array (at, ind_at, is_range, new_data))
 	  goto return_error;
@@ -1103,7 +1175,6 @@ convert_nasty_index_objs (SLang_Array_Type *at,
    total_num_elements = 1;
    for (i = 0; i < num_indices; i++)
      {
-	SLuindex_Type new_total_num_elements;
 	SLang_Object_Type *obj = index_objs + i;
 	range_delta_buf [i] = 0;
 
@@ -1145,13 +1216,11 @@ convert_nasty_index_objs (SLang_Array_Type *at,
 	       }
 	  }
 
-	new_total_num_elements = total_num_elements * max_dims[i];
-	if (max_dims[i] && (new_total_num_elements/max_dims[i] != total_num_elements))
+	if (-1 == check_overflow_mult_ui (total_num_elements, max_dims[i], &total_num_elements))
 	  {
-	     throw_size_error (SL_INVALID_PARM);
+	     throw_size_error (SL_Index_Error);
 	     return -1;
 	  }
-       total_num_elements = new_total_num_elements;
      }
 
    *num_elements = total_num_elements;
@@ -1171,18 +1240,20 @@ aget_from_indices (SLang_Array_Type *at,
    SLindex_Type range_buf [SLARRAY_MAX_DIMS];
    SLindex_Type range_delta_buf [SLARRAY_MAX_DIMS];
    SLindex_Type max_dims [SLARRAY_MAX_DIMS];
-   SLuindex_Type i, num_elements;
+   SLuindex_Type num_elements;
    SLang_Array_Type *new_at;
    SLindex_Type map_indices[SLARRAY_MAX_DIMS];
    SLindex_Type indices [SLARRAY_MAX_DIMS];
    SLindex_Type *at_dims;
    size_t sizeof_type;
+   unsigned int i, last_changed_index;
    int is_ptr, ret, is_array;
    char *new_data;
    SLang_Class_Type *cl;
    int is_dim_array[SLARRAY_MAX_DIMS];
    SLuindex_Type last_index;
    SLindex_Type last_index_num;
+   int fast_ok = 0;
 
    if (-1 == convert_nasty_index_objs (at, index_objs, num_indices,
 				       index_data, range_buf, range_delta_buf,
@@ -1224,11 +1295,15 @@ aget_from_indices (SLang_Array_Type *at,
    if ((range_delta_buf[last_index] == 1) && (range_buf[last_index] >= 0))
      last_index_num = max_dims[last_index];
    else
-     last_index_num = 0;
+     {
+	last_index_num = 0;
+	fast_ok = ((is_ptr == 0) && (at->index_fun == linear_get_data_addr));
+     }
 
+   last_changed_index = 0;
    while (1)
      {
-	for (i = 0; i < num_indices; i++)
+	for (i = last_changed_index; i < num_indices; i++)
 	  {
 	     SLindex_Type j = map_indices[i];
 	     SLindex_Type indx;
@@ -1238,15 +1313,7 @@ aget_from_indices (SLang_Array_Type *at,
 	     else
 	       indx = index_data [i][j];
 
-	     if (indx < 0)
-	       indx += at_dims[i];
-
-	     if ((indx < 0) || (indx >= at_dims[i]))
-	       {
-		  do_index_error (i, indx, at_dims[i]);
-		  free_array (new_at);
-		  return -1;
-	       }
+	     CHECK_INDEX (indx, at_dims[i], free_array(new_at); return -1);
 	     indices[i] = indx;
 	  }
 
@@ -1260,16 +1327,32 @@ aget_from_indices (SLang_Array_Type *at,
 	     new_data += last_index_num * sizeof_type;
 	     map_indices[last_index] = last_index_num;
 
-	     if (0 != _pSLarray_next_index (map_indices, max_dims, num_indices))
+	     if (0 != next_index (map_indices, max_dims, num_indices, &last_changed_index))
 	       break;
 	  }
 	else
 	  {
-	     if (-1 == _pSLarray_aget_transfer_elem (at, indices, (VOID_STAR)new_data, sizeof_type, is_ptr))
+	     if (fast_ok)
+	       {
+		  size_t ofs = indices[0];
+		  /* Index ranges have been checked above, no pointers, and a linear range */
+		  for (i = 1; i < num_indices; i++)
+		    ofs = ofs*at_dims[i] + indices[i];
+
+		  if (ofs >= at->num_elements)
+		    {
+		       SLang_set_error (SL_Index_Error);
+		       free_array (new_at);
+		       return -1;
+		    }
+		  memcpy ((VOID_STAR)new_data, (char *)at->data + ofs*sizeof_type, sizeof_type);
+	       }
+	     else if (-1 == _pSLarray_aget_transfer_elem (at, indices, (VOID_STAR)new_data, sizeof_type, is_ptr))
 	       {
 		  free_array (new_at);
 		  return -1;
 	       }
+
 	     new_data += sizeof_type;
 
 	     if (num_indices == 1)
@@ -1278,7 +1361,7 @@ aget_from_indices (SLang_Array_Type *at,
 		  if (map_indices[0] == max_dims[0])
 		    break;
 	       }
-	     else if (0 != _pSLarray_next_index (map_indices, max_dims, num_indices))
+	     else if (0 != next_index (map_indices, max_dims, num_indices, &last_changed_index))
 	       break;
 	  }
      }
@@ -1382,7 +1465,6 @@ static int pop_array_as_bstring (SLang_BString_Type **bs)
    return ret;
 }
 
-#if SLANG_OPTIMIZE_FOR_SPEED
 /* This routine assumes that the array is 1d */
 int _pSLarray1d_push_elem (SLang_Array_Type *at, SLindex_Type idx)
 {
@@ -1425,14 +1507,13 @@ int _pSLarray1d_push_elem (SLang_Array_Type *at, SLindex_Type idx)
    (*cl->cl_adestroy) (at->data_type, (VOID_STAR)new_data);
    return ret;
 }
-#endif
 
 static int aget_from_array (unsigned int num_indices)
 {
    SLang_Array_Type *at;
    SLang_Object_Type index_objs [SLARRAY_MAX_DIMS];
-   int ret;
-   int is_index_array, free_indices;
+   unsigned int i;
+   int is_index_array, free_indices, ret;
 
    /* Implementation note: The push_string_element function calls this with
     * num_indices==1, and assumes that the pop_array call below will happen.
@@ -1470,14 +1551,25 @@ static int aget_from_array (unsigned int num_indices)
    if (is_index_array == 0)
      {
 #if SLANG_OPTIMIZE_FOR_SPEED
-	if ((num_indices == 1)
-	    && (index_objs[0].o_data_type == SLANG_ARRAY_INDEX_TYPE)
-	    && (at->num_dims == 1))
+	SLindex_Type indices[SLARRAY_MAX_DIMS];
+
+	for (i = 0; i < num_indices; i++)
 	  {
-	     ret = _pSLarray1d_push_elem (at, index_objs[0].v.index_val);
-	     free_indices = 0;
+	     if (index_objs[i].o_data_type != SLANG_ARRAY_INDEX_TYPE)
+	       break;
+	     indices[i] = index_objs[i].v.index_val;
 	  }
-	else
+	if (i == num_indices)
+	  {
+	     VOID_STAR addr = (*at->index_fun)(at, indices);
+
+	     if (addr == NULL)
+	       ret = -1;
+	     else
+	       ret = push_element_at_addr (at, addr, 1);
+	     free_array (at);
+	     return ret;
+	  }
 #endif
 	ret = aget_from_indices (at, index_objs, num_indices);
      }
@@ -1487,7 +1579,6 @@ static int aget_from_array (unsigned int num_indices)
    free_array (at);
    if (free_indices)
      {
-	unsigned int i;
 	for (i = 0; i < num_indices; i++)
 	  SLang_free_object (index_objs + i);
      }
@@ -1745,11 +1836,7 @@ aput_get_data_to_put (SLang_Class_Type *cl, SLuindex_Type num_elements, int allo
 	if (-1 == SLang_pop_array (&at, 0))
 	  return -1;
 
-	if ((at->num_elements != num_elements)
-#if 0
-	    || (at->num_dims != 1)
-#endif
-	    )
+	if (at->num_elements != num_elements)
 	  {
 	     _pSLang_verror (SL_Index_Error, "Array size is inappropriate for use with index-array");
 	     free_array (at);
@@ -1772,7 +1859,7 @@ aput_get_data_to_put (SLang_Class_Type *cl, SLuindex_Type num_elements, int allo
 }
 
 static int
-aput_from_indices (SLang_Array_Type *at,
+aput_from_index_objs (SLang_Array_Type *at,
 		   SLang_Object_Type *index_objs, unsigned int num_indices)
 {
    SLindex_Type *index_data [SLARRAY_MAX_DIMS];
@@ -1780,12 +1867,13 @@ aput_from_indices (SLang_Array_Type *at,
    SLindex_Type range_delta_buf [SLARRAY_MAX_DIMS];
    SLindex_Type max_dims [SLARRAY_MAX_DIMS];
    SLindex_Type *at_dims;
-   SLuindex_Type i, num_elements;
+   SLuindex_Type num_elements;
    SLang_Array_Type *bt;
    SLindex_Type map_indices[SLARRAY_MAX_DIMS];
    SLindex_Type indices [SLARRAY_MAX_DIMS];
    size_t sizeof_type;
-   int is_ptr, is_array, ret;
+   unsigned int i, last_changed_index;
+   int is_ptr, is_array, ret, fast_ok = 0;
    char *data_to_put;
    SLuindex_Type data_increment;
    SLang_Class_Type *cl;
@@ -1818,11 +1906,15 @@ aput_from_indices (SLang_Array_Type *at,
    if ((range_delta_buf[last_index] == 1) && (range_buf[last_index] >= 0))
      last_index_num = max_dims[last_index];
    else
-     last_index_num = 0;
+     {
+	last_index_num = 0;
+	fast_ok = ((is_ptr == 0) && (at->index_fun == linear_get_data_addr));
+     }
 
+   last_changed_index = 0;
    if (num_elements) while (1)
      {
-	for (i = 0; i < num_indices; i++)
+	for (i = last_changed_index; i < num_indices; i++)
 	  {
 	     SLindex_Type j = map_indices[i];
 	     SLindex_Type indx;
@@ -1832,14 +1924,7 @@ aput_from_indices (SLang_Array_Type *at,
 	     else
 	       indx = index_data [i][j];
 
-	     if (indx < 0)
-	       indx += at_dims[i];
-
-	     if ((indx < 0) || (indx >= at_dims[i]))
-	       {
-		  do_index_error (i, indx, at_dims[i]);
-		  goto return_error;
-	       }
+	     CHECK_INDEX(indx, at_dims[i], goto return_error);
 	     indices[i] = indx;
 	  }
 
@@ -1853,31 +1938,46 @@ aput_from_indices (SLang_Array_Type *at,
 	     data_to_put += last_index_num * data_increment;
 	     map_indices[last_index] = last_index_num;
 
-	     if (0 != _pSLarray_next_index (map_indices, max_dims, num_indices))
+	     if (0 != next_index (map_indices, max_dims, num_indices, &last_changed_index))
 	       break;
 	  }
 	else
 	  {
-	     if (-1 == _pSLarray_aput_transfer_elem (at, indices, (VOID_STAR)data_to_put, sizeof_type, is_ptr))
+	     if (fast_ok)
+	       {
+		  size_t ofs = indices[0];
+		  /* Index ranges have been checked above, no pointers, and a linear range */
+		  for (i = 1; i < num_indices; i++)
+		    ofs = ofs*at_dims[i] + indices[i];
+
+		  if (ofs >= at->num_elements)
+		    {
+		       SLang_set_error (SL_Index_Error);
+		       goto return_error;
+		    }
+		  memcpy ((char *)at->data + ofs*sizeof_type, (VOID_STAR)data_to_put, sizeof_type);
+	       }
+	     else if (-1 == _pSLarray_aput_transfer_elem (at, indices, (VOID_STAR)data_to_put, sizeof_type, is_ptr))
 	       goto return_error;
 
 	     data_to_put += data_increment;
+
 	     if (num_indices == 1)
 	       {
 		  map_indices[0]++;
 		  if (map_indices[0] == max_dims[0])
 		    break;
 	       }
-	     else if (0 != _pSLarray_next_index (map_indices, max_dims, num_indices))
+	     else if (0 != next_index (map_indices, max_dims, num_indices, &last_changed_index))
 	       break;
 	  }
      }
 
    ret = 0;
 
-   /* drop */
+   /* fall through */
 
-   return_error:
+return_error:
    if (bt == NULL)
      {
 	if (is_ptr)
@@ -1889,10 +1989,10 @@ aput_from_indices (SLang_Array_Type *at,
 }
 
 static int
-  aput_generic_from_index_array (char *src_data,
-				 SLuindex_Type data_increment,
-				 SLang_Array_Type *ind_at, int is_range,
-				 SLang_Array_Type *dest_at)
+aput_generic_from_index_array (char *src_data,
+			       SLuindex_Type data_increment,
+			       SLang_Array_Type *ind_at, int is_range,
+			       SLang_Array_Type *dest_at)
 {
    SLindex_Type num_elements = (SLindex_Type) dest_at->num_elements;
    size_t sizeof_type = dest_at->sizeof_type;
@@ -1906,22 +2006,15 @@ static int
 	SLindex_Type idx = r->first_index, delta = r->delta;
 	SLuindex_Type j, jmax = ind_at->num_elements;
 
+	if (-1 == check_range_indices (idx, delta, jmax, num_elements, NULL))
+	  return -1;
+
 	for (j = 0; j < jmax; j++)
 	  {
 	     size_t offset;
 	     SLindex_Type i = idx;
 
-	     if (i < 0)
-	       {
-		  i += num_elements;
-		  if (i < 0)
-		    i = num_elements;
-	       }
-	     if (i >= num_elements)
-	       {
-		  SLang_set_error (SL_Index_Error);
-		  return -1;
-	       }
+	     if (i < 0) i += num_elements;
 	     offset = sizeof_type * (SLuindex_Type)i;
 	     if (-1 == transfer_n_elements (dest_at, (VOID_STAR) (dest_data + offset),
 					    (VOID_STAR) src_data, sizeof_type,
@@ -1943,18 +2036,7 @@ static int
 	size_t offset;
 	SLindex_Type i = *indices;
 
-	if (i < 0)
-	  {
-	     i += num_elements;
-	     if (i < 0)
-	       i = num_elements;
-	  }
-	if (i >= num_elements)
-	  {
-	     SLang_set_error (SL_Index_Error);
-	     return -1;
-	  }
-
+	CHECK_INDEX(i,num_elements,return -1);
 	offset = sizeof_type * (SLuindex_Type)i;
 
 	if (-1 == transfer_n_elements (dest_at, (VOID_STAR) (dest_data + offset),
@@ -2039,7 +2121,7 @@ aput_from_index_array (SLang_Array_Type *at, SLang_Array_Type *ind_at)
 
       case SLANG_LONG_TYPE:
       case SLANG_ULONG_TYPE:
-	/* drop */
+	/* fall through */
 #if LONG_IS_NOT_INT
 	if (-1 == aput_longs_from_index_array (data_to_put, data_increment,
 					      ind_at, is_range,
@@ -2062,7 +2144,7 @@ aput_from_index_array (SLang_Array_Type *at, SLang_Array_Type *ind_at)
      }
 
    ret = 0;
-   /* Drop */
+   /* fall through */
 
    return_error:
 
@@ -2127,36 +2209,48 @@ int _pSLarray_aput1 (unsigned int num_indices)
    if (is_index_array == 0)
      {
 #if SLANG_OPTIMIZE_FOR_SPEED
-	if ((num_indices == 1) && (index_objs[0].o_data_type == SLANG_ARRAY_INDEX_TYPE)
-	    && (0 == (at->flags & (SLARR_DATA_VALUE_IS_RANGE|SLARR_DATA_VALUE_IS_POINTER)))
-	    && (1 == at->num_dims)
+	if ((0 == (at->flags & (SLARR_DATA_VALUE_IS_RANGE|SLARR_DATA_VALUE_IS_POINTER)))
 	    && (at->data != NULL))
 	  {
-	     SLindex_Type ofs = index_objs[0].v.index_val;
-	     if (ofs < 0) ofs += at->dims[0];
-	     if ((ofs >= at->dims[0]) || (ofs < 0))
-	       ret = aput_from_indices (at, index_objs, num_indices);
-	     else switch (at->data_type)
+	     SLindex_Type indices[SLARRAY_MAX_DIMS];
+	     unsigned int i;
+
+	     for (i = 0; i < num_indices; i++)
 	       {
-		case SLANG_CHAR_TYPE:
-		  ret = SLang_pop_char (((char *)at->data + ofs));
-		  break;
-		case SLANG_INT_TYPE:
-		  ret = SLang_pop_integer (((int *)at->data + ofs));
-		  break;
-#if SLANG_HAS_FLOAT
-		case SLANG_DOUBLE_TYPE:
-		  ret = SLang_pop_double ((double *)at->data + ofs);
-		  break;
-#endif
-		default:
-		  ret = aput_from_indices (at, index_objs, num_indices);
+		  if (index_objs[i].o_data_type != SLANG_ARRAY_INDEX_TYPE)
+		    break;
+		  indices[i] = index_objs[i].v.index_val;
 	       }
-	     free_array (at);
-	     return ret;
+	     if (i == num_indices)
+	       {
+		  VOID_STAR addr = (*at->index_fun)(at, indices);
+
+		  if (addr == NULL)
+		    ret = -1;
+		  else switch (at->data_type)
+		    {
+		     case SLANG_CHAR_TYPE:
+		       ret = SLang_pop_char ((char *)addr);
+		       break;
+		     case SLANG_INT_TYPE:
+		       ret = SLang_pop_integer ((int *)addr);
+		       break;
+# if SLANG_HAS_FLOAT
+		     case SLANG_DOUBLE_TYPE:
+		       ret = SLang_pop_double ((double *)addr);
+		       break;
+# endif
+		     default:
+		       ret = aput_from_index_objs (at, index_objs, num_indices);
+		    }
+		  free_array (at);
+		  return ret;
+	       }
+
+	     /* drop */
 	  }
 #endif
-	ret = aput_from_indices (at, index_objs, num_indices);
+	ret = aput_from_index_objs (at, index_objs, num_indices);
      }
    else
      ret = aput_from_index_array (at, index_objs[0].v.array_val);
@@ -2774,7 +2868,7 @@ static void init_char_array (void)
      }
 
    strncpy((char *) at->data, s, ndim);
-   /* drop */
+   /* fall through */
 
    free_and_return:
    free_array (at);
@@ -3442,25 +3536,7 @@ static SLang_Array_Type *concat_arrays (unsigned int count)
 	dest_data += num_elements * sizeof_type;
      }
 
-#if 0
-   /* If the arrays are all 1-d, and all the same size, then reshape to a
-    * 2-d array.  This will allow us to do, e.g.
-    * a = [[1,2], [3,4]]
-    * to specifiy a 2-d.
-    * Someday I will generalize this.
-    */
-   /* This is a bad idea.  Everyone using it expects concatenation to happen.
-    * Perhaps I will extend the syntax to allow a 2-d array to be expressed
-    * as [[1,2];[3,4]].
-    */
-   if ((max_dims == min_dims) && (max_dims == 1) && (min_rows == max_rows))
-     {
-	at->num_dims = 2;
-	at->dims[0] = count;
-	at->dims[1] = min_rows;
-     }
-#endif
-   free_and_return:
+free_and_return:
 
    for (i = 0; i < count; i++)
      free_array (arrays[i]);
@@ -3471,38 +3547,30 @@ static SLang_Array_Type *concat_arrays (unsigned int count)
 
 int _pSLarray_inline_array (void)
 {
-   SLang_Object_Type *obj, *objmin;
    SLtype type;
    unsigned int count;
    SLang_Array_Type *at;
 
-   obj = _pSLang_get_run_stack_pointer ();
-   objmin = _pSLang_get_run_stack_base ();
-
    count = SLang_Num_Function_Args;
    type = 0;
 
-   while ((count > 0) && (--obj >= objmin))
+   while (count > 0)
      {
-	SLtype this_type = obj->o_data_type;
+	int this_type;
 
-	if (type == 0)
-	  type = this_type;
-	else if (type != this_type)
+	count--;
+	if (-1 == (this_type = SLang_peek_at_stack_n (count)))
+	  return -1;
+
+	if (type == 0) type = (SLtype) this_type;
+	else if (type != (SLtype) this_type)
 	  {
-	     if (-1 == promote_to_common_type (type, this_type, &type))
+	     if (-1 == promote_to_common_type (type, (SLtype) this_type, &type))
 	       {
-		  _pSLclass_type_mismatch_error (type, this_type);
+		  _pSLclass_type_mismatch_error (type, (SLtype) this_type);
 		  return -1;
 	       }
 	  }
-	count--;
-     }
-
-   if (count != 0)
-     {
-	SLang_set_error (SL_STACK_UNDERFLOW);
-	return -1;
      }
 
    count = SLang_Num_Function_Args;
@@ -3534,7 +3602,7 @@ int _pSLarray_inline_array (void)
 	  {
 	     count--;
 	     index_obj.v.index_val = count;
-	     if (-1 == aput_from_indices (at, &index_obj, 1))
+	     if (-1 == aput_from_index_objs (at, &index_obj, 1))
 	       {
 		  free_array (at);
 		  SLdo_pop_n (count);
@@ -3594,7 +3662,7 @@ int _pSLarray_convert_to_array (VOID_STAR cd,
 	  goto unknown_error;
 
 	index_obj.v.index_val = i;
-	if (-1 == aput_from_indices (at, &index_obj, 1))
+	if (-1 == aput_from_index_objs (at, &index_obj, 1))
 	  goto return_error;
      }
 
@@ -3642,7 +3710,7 @@ static int try_range_int_binary (SLang_Array_Type *at, int op, int x, int swap, 
 	     break;
 	  }
 	x = -x;
-	/* drop */
+	/* fall through */
       case SLANG_PLUS:
 	first_index = at_r->first_index + x;
 	last_index = at_r->last_index + x;
@@ -3703,7 +3771,7 @@ static int array_binary_op (int op,
 	     int status = try_range_int_binary (at, op, *(int *)bp, 0, cp);
 	     if (status)
 	       return status;
-	     /* drop */
+	     /* fall through */
 	  }
 
 	if (-1 == coerse_array_to_linear (at))
@@ -3735,7 +3803,7 @@ static int array_binary_op (int op,
 	     int status = try_range_int_binary (bt, op, *(int *)ap, 1, cp);
 	     if (status)
 	       return status;
-	     /* drop */
+	     /* fall through */
 	  }
 
 	if (-1 == coerse_array_to_linear (bt))
@@ -4029,7 +4097,7 @@ static void is_null_intrinsic (void)
 
       case SLANG_NULL_TYPE:
 	ret = 1;
-	/* drop */
+	/* fall through */
       default:
 	(void) SLdo_pop();
 	(void) SLang_push_char (ret);
@@ -4217,7 +4285,7 @@ static void array_where_intern (int cmp)
 	(void) SLang_assign_to_ref (ref, SLANG_ARRAY_TYPE, &ct);
 	/* Let any error propagate */
 	free_array (ct);
-	/* drop */
+	/* fall through */
      }
    else
      {
@@ -4234,7 +4302,7 @@ static void array_where_intern (int cmp)
      }
 
    (void) SLang_push_array (bt, 0);
-   /* drop */
+   /* fall through */
 
    return_error:
    free_array (at);
@@ -4358,7 +4426,7 @@ static void array_wherediff (void)
 	     if (isdiff[i] == 0) *idx_ptr++ = i;
 	  }
 	(void) SLang_assign_to_ref (ref, SLANG_ARRAY_TYPE, &at);
-	/* drop */
+	/* fall through */
      }
 
 free_and_return:
@@ -4667,6 +4735,7 @@ static void array_map (void)
    SLuindex_Type i, nrets, nargs;
    SLang_Array_Type *at_control;
    SLang_Name_Type *func;
+   SLang_Struct_Type *q;
    SLuindex_Type num_elements;
    int num_arraymap_parms;
 
@@ -4678,6 +4747,9 @@ static void array_map (void)
 	SLdo_pop_n (num_arraymap_parms);
 	return;
      }
+
+   if (-1 == _pSLang_get_qualifiers (&q))
+     return;
 
    if (-1 == pop_array_map_args (num_arraymap_parms, &retvals, &nrets, &func,
 				 &argvals, &nargs, &at_control))
@@ -4730,6 +4802,9 @@ static void array_map (void)
 	     goto return_error;
 	  }
 
+	if ((q != NULL) && (-1 == _pSLang_set_qualifiers (q)))
+	  goto return_error;
+
 	if (-1 == SLexecute_function (func))
 	  goto return_error;
 
@@ -4779,10 +4854,11 @@ static void array_map (void)
 	  (void) SLang_push_array (retvals[i].at, 0);
      }
 
-   /* drop */
+   /* fall through */
 
 return_error:
    free_arraymap_argvals (argvals, nargs);
+   if (q != NULL) SLang_free_struct (q);
    SLang_free_function (func);
    free_arraymap_retvals (retvals, nrets);
 }
@@ -4831,7 +4907,8 @@ static void array_shape (void)
    free_array (at);
 }
 
-#if 0
+#define HAVE_AGET_PUT_INTRIN 0
+#if HAVE_AGET_PUT_INTRIN
 static int pop_int_indices (SLindex_Type *dims, unsigned int ndims)
 {
    int i;
@@ -4951,7 +5028,7 @@ static void aget_intrin (void)
    free_and_return:
    free_array (at);
 }
-#endif
+#endif				       /* HAVE_AGET_PUT_INTRIN */
 
 static int pop_byte_order (int *bop)
 {
@@ -5031,7 +5108,7 @@ static SLang_Intrin_Fun_Type Array_Table [] =
    MAKE_INTRINSIC_0("reshape", array_reshape, SLANG_VOID_TYPE),
    MAKE_INTRINSIC_0("_reshape", _array_reshape, SLANG_VOID_TYPE),
    MAKE_INTRINSIC_0("_array_byteswap", byteswap_intrin, SLANG_VOID_TYPE),
-#if 0
+#if HAVE_AGET_PUT_INTRIN
    MAKE_INTRINSIC_0("__aget", aget_intrin, SLANG_VOID_TYPE),
    MAKE_INTRINSIC_0("__aput", aput_intrin, SLANG_VOID_TYPE),
 #endif
@@ -5423,18 +5500,6 @@ array_datatype_deref (SLtype type)
 {
    SLang_Array_Type *ind_at;
    SLang_Array_Type *at;
-
-#if 0
-   /* The parser generated code for this as if a function call were to be
-    * made.  However, the interpreter simply called the deref object routine
-    * instead of the function call.  So, I must simulate the function call.
-    * This needs to be formalized to hide this detail from applications
-    * who wish to do the same.  So...
-    * FIXME: Priority=medium
-    */
-   if (0 == _pSL_increment_frame_pointer ())
-     (void) _pSL_decrement_frame_pointer ();
-#endif
 
    if (-1 == pop_1d_index_array (&ind_at))
      goto return_error;

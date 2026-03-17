@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -495,7 +495,7 @@ unsigned int _pSLsys_getkey (void)
 	  break;
 	/* ^space = ^@ */
 	scan = 3;		/* send back Ctrl-@ => ^@^C */
-	/* drop */
+	/* fall through */
       case 0xe0:
       case 0:			/* extended key code */
 	ch = _pSLpc_convert_scancode (scan, 0, 1);
