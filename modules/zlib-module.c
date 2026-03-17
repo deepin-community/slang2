@@ -1,6 +1,6 @@
 /* -*- mode: C; mode: fold; -*- */
 /*
-Copyright (C) 2008-2017,2018 John E. Davis
+Copyright (C) 2008-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -485,7 +485,7 @@ static void inflate_reset_intrin (ZLib_Type *z)
      return;
 
    if (z->initialized)
-     check_zerror (deflateReset (&z->zs));
+     check_zerror (inflateReset (&z->zs));
 }
 
 static void inflate_flush_intrin (ZLib_Type *z, int *flush)

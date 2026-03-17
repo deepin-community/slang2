@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2005-2017,2018 John E. Davis
+Copyright (C) 2005-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -950,11 +950,11 @@ static void set_rline_update_hook (void)
       case 3:
 	if (-1 == SLang_pop_anytype (&cb->cd))
 	  return;
-	/* drop */
+	/* fall through */
       case 2:
 	if (NULL == (cb->update_hook = SLang_pop_function ()))
 	  goto free_and_return;
-	/* drop */
+	/* fall through */
       case 1:
 	if (NULL == (cb->mmt = pop_sri_type (&cb->sri)))
 	  goto free_and_return;

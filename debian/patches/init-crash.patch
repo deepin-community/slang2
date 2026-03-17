@@ -4,11 +4,9 @@ Forwarded: No
 Reviewed-By: Alastair McKinstry <mckinstry@debian.org>
 Last-Update: 2016-09-23
 
-Index: slang2-2.3.2/src/sltermin.c
-===================================================================
---- slang2-2.3.2.orig/src/sltermin.c
-+++ slang2-2.3.2/src/sltermin.c
-@@ -591,13 +591,10 @@ static int tcap_getent (SLCONST char *te
+--- a/src/sltermin.c
++++ b/src/sltermin.c
+@@ -852,13 +852,10 @@
     if (NULL == (buf = (unsigned char *) SLmalloc (ulen)))
       return -1;
  
@@ -22,7 +20,7 @@ Index: slang2-2.3.2/src/sltermin.c
     t = termcap;
     len = tcap_extract_field (t);
     if (len < 0)
-@@ -605,9 +602,9 @@ static int tcap_getent (SLCONST char *te
+@@ -866,9 +863,9 @@
  	SLfree ((char *)buf);
  	return -1;
       }
@@ -35,7 +33,7 @@ Index: slang2-2.3.2/src/sltermin.c
     ti->name_section_size = len;
  
     /* Now, we are really at the start of the termcap entries.  Point the
-@@ -616,7 +613,7 @@ static int tcap_getent (SLCONST char *te
+@@ -877,7 +874,7 @@
     termcap = t + (len + 1);
  
     /* Process strings first. */
@@ -44,7 +42,7 @@ Index: slang2-2.3.2/src/sltermin.c
     t = termcap;
     while (-1 != (len = tcap_extract_field (t)))
       {
-@@ -642,6 +639,7 @@ static int tcap_getent (SLCONST char *te
+@@ -903,6 +900,7 @@
  		  t = (unsigned char *) _pSLexpand_escaped_char ((char *) t, (char *) tmax, &wch, NULL);
  		  if (t == NULL)
  		    {
@@ -52,7 +50,7 @@ Index: slang2-2.3.2/src/sltermin.c
  		       SLfree ((char *)buf);
  		       return -1;
  		    }
-@@ -662,12 +660,14 @@ static int tcap_getent (SLCONST char *te
+@@ -923,12 +921,14 @@
  	/* skip colon to next field. */
  	t++;
       }
@@ -69,7 +67,7 @@ Index: slang2-2.3.2/src/sltermin.c
     while (-1 != (len = tcap_extract_field (t)))
       {
  	unsigned char *b1;
-@@ -692,11 +692,13 @@ static int tcap_getent (SLCONST char *te
+@@ -953,11 +953,13 @@
  	b1[2] = (unsigned char) len;    /* replace the # by the length */
  	t++;
       }
@@ -85,7 +83,7 @@ Index: slang2-2.3.2/src/sltermin.c
     while (-1 != (len = tcap_extract_field (t)))
       {
  	/* We are looking for: XX#NUMBER */
-@@ -710,7 +712,10 @@ static int tcap_getent (SLCONST char *te
+@@ -971,7 +973,10 @@
  	t += 3;
  	b += 2;
       }

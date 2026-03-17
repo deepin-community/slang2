@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2014-2017,2018 John E. Davis
+Copyright (C) 2014-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -349,14 +349,14 @@ static int md5_accumulate (SLChksum_Type *md5, unsigned char *buf, unsigned int 
    return 0;
 }
 
-static int md5_close (SLChksum_Type *md5, unsigned char *digest)
+static int md5_close (SLChksum_Type *md5, unsigned char *digest, int just_free)
 {
    unsigned char num_bits_buf[8];
 
    if (md5 == NULL)
      return -1;
 
-   if (digest != NULL)
+   if ((digest != NULL) && (just_free == 0))
      {
 	/* Handle num bits before padding */
 	uint32_to_uchar (md5->num_bits, 2, num_bits_buf);

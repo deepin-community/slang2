@@ -1,4 +1,6 @@
 /* -*- mode: C -*- */
+
+
 #ifdef AGET_FROM_INDEX_ARRAY_FUN
 static int AGET_FROM_INDEX_ARRAY_FUN (GENERIC_TYPE *src_data, SLindex_Type num_elements,
 				      SLang_Array_Type *ind_at, int is_range,
@@ -11,13 +13,15 @@ static int AGET_FROM_INDEX_ARRAY_FUN (GENERIC_TYPE *src_data, SLindex_Type num_e
 	SLarray_Range_Array_Type *r = (SLarray_Range_Array_Type *)ind_at->data;
 	SLindex_Type idx = r->first_index, delta = r->delta;
 	SLindex_Type j, jmax = (SLindex_Type) ind_at->num_elements;
+	int ispos;
 
 	if (jmax == 0)
 	  return 0;
 
-	if ((idx >= 0)
-	    && ((idx + delta * (jmax-1)) >= 0)
-	    && ((idx + delta * (jmax-1)) < num_elements))
+	if (-1 == check_range_indices (idx, delta, jmax, num_elements, &ispos))
+	  return -1;
+
+	if (ispos)
 	  {
 	     for (j = 0; j < jmax; j++)
 	       {
@@ -30,17 +34,7 @@ static int AGET_FROM_INDEX_ARRAY_FUN (GENERIC_TYPE *src_data, SLindex_Type num_e
 	for (j = 0; j < jmax; j++)
 	  {
 	     SLindex_Type i = idx;
-	     if (i < 0)
-	       {
-		  i += num_elements;
-		  if (i < 0)
-		    i = num_elements;
-	       }
-	     if (i >= num_elements)
-	       {
-		  SLang_set_error (SL_Index_Error);
-		  return -1;
-	       }
+	     if (i < 0) i += num_elements;
 	     dest_data[j] = src_data[i];
 	     idx += delta;
 	  }
@@ -55,17 +49,7 @@ static int AGET_FROM_INDEX_ARRAY_FUN (GENERIC_TYPE *src_data, SLindex_Type num_e
      {
 	SLindex_Type i = *indices;
 
-	if (i < 0)
-	  {
-	     i += num_elements;
-	     if (i < 0)
-	       i = num_elements;
-	  }
-	if (i >= num_elements)
-	  {
-	     SLang_set_error (SL_Index_Error);
-	     return -1;
-	  }
+	CHECK_INDEX(i,num_elements,return -1);
 	*dest_data++ = src_data[i];
 	indices++;
      }
@@ -86,13 +70,15 @@ static int APUT_FROM_INDEX_ARRAY_FUN (char *src_data, SLuindex_Type data_increme
 	SLarray_Range_Array_Type *r = (SLarray_Range_Array_Type *)ind_at->data;
 	SLindex_Type idx = r->first_index, delta = r->delta;
 	SLindex_Type j, jmax = (SLindex_Type) ind_at->num_elements;
+	int ispos;
 
 	if (jmax == 0)
 	  return 0;
 
-	if ((idx >= 0)
-	    && ((idx + delta * (jmax-1)) >= 0)
-	    && ((idx + delta * (jmax-1)) < num_elements))
+	if (-1 == check_range_indices (idx, delta, jmax, num_elements, &ispos))
+	  return -1;
+
+	if (ispos)
 	  {
 	     for (j = 0; j < jmax; j++)
 	       {
@@ -106,17 +92,7 @@ static int APUT_FROM_INDEX_ARRAY_FUN (char *src_data, SLuindex_Type data_increme
 	for (j = 0; j < jmax; j++)
 	  {
 	     SLindex_Type i = idx;
-	     if (i < 0)
-	       {
-		  i += num_elements;
-		  if (i < 0)
-		    i = num_elements;
-	       }
-	     if (i >= num_elements)
-	       {
-		  SLang_set_error (SL_Index_Error);
-		  return -1;
-	       }
+	     if (i < 0) i += num_elements;
 	     dest_data[i] = *(GENERIC_TYPE *)src_data;
 	     idx += delta;
 	     src_data += data_increment;
@@ -132,17 +108,7 @@ static int APUT_FROM_INDEX_ARRAY_FUN (char *src_data, SLuindex_Type data_increme
      {
 	SLindex_Type i = *indices;
 
-	if (i < 0)
-	  {
-	     i += num_elements;
-	     if (i < 0)
-	       i = num_elements;
-	  }
-	if (i >= num_elements)
-	  {
-	     SLang_set_error (SL_Index_Error);
-	     return -1;
-	  }
+	CHECK_INDEX(i,num_elements,return -1);
 	dest_data[i] = *(GENERIC_TYPE *)src_data;
 	src_data += data_increment;
 	indices++;

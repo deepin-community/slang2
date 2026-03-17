@@ -3,11 +3,9 @@ Description: Fix for segfault in slang/jed
 Last-Updated: 2014-10-21
 Forwarded: not-needed
 
-Index: slang2-2.3.1/src/slstrops.c
-===================================================================
---- slang2-2.3.1.orig/src/slstrops.c
-+++ slang2-2.3.1/src/slstrops.c
-@@ -1384,6 +1384,8 @@ static int strtrim_internal (int do_beg,
+--- a/src/slstrops.c
++++ b/src/slstrops.c
+@@ -1385,6 +1385,8 @@
     if (cd.lut == NULL)
       return -1;
  

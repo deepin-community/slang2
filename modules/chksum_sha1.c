@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2014-2017,2018 John E. Davis
+Copyright (C) 2014-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -273,14 +273,14 @@ static void uint32_to_uchar (_pSLuint32_Type *u, unsigned int num, unsigned char
      }
 }
 
-static int sha1_close (SLChksum_Type *sha1, unsigned char *digest)
+static int sha1_close (SLChksum_Type *sha1, unsigned char *digest, int just_free)
 {
    unsigned char num_bits_buf[8];
 
    if (sha1 == NULL)
      return -1;
 
-   if (digest != NULL)
+   if ((digest != NULL) && (just_free == 0))
      {
 	/* Handle num bits before padding */
 	uint32_to_uchar (sha1->num_bits, 2, num_bits_buf);
@@ -308,6 +308,7 @@ SLChksum_Type *_pSLchksum_sha1_new (char *name)
    sha1->accumulate = sha1_accumulate;
    sha1->close = sha1_close;
    sha1->digest_len = SHA1_DIGEST_LEN;
+   sha1->buffer_size = SHA1_BUFSIZE;
 
    sha1->h[0] = 0x67452301;
    sha1->h[1] = 0xEFCDAB89;

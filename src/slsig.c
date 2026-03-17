@@ -1,6 +1,6 @@
 /* interpreter signal handling functions */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -747,7 +747,7 @@ static void setitimer_intrinsic (void)
       case 3:
 	if (-1 == SLang_pop_double (&interval))
 	  goto free_and_return;
-	/* drop */
+	/* fall through */
       case 2:
       default:
 	if ((-1 == SLang_pop_double (&value))

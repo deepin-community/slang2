@@ -1,4 +1,187 @@
 -*- mode: text; mode: fold -*-
+Changes since 2.3.2
+1. src/slposdir.c: stat_file now support open file descriptors, in
+   addition to filenames.
+2. src/sltoken.c: Ignore the \r character in multiline strings that
+   appear to have CRLF line terminators.  (Manfred Hanke)
+3. *.tm: minor documentation updates
+4. src/slang.h: SLANG_VERSION_STRING was missing the "pre" prefix.
+5. src/sltermin.c: Added support for TERMINFO_DIRS (based upon a patch
+   forwarded by Jörg Thalheim)
+6. src/slarray.c: src/slarray.c: some integer overflow checks were
+   resulting undefined behavior (reported by Sergey)
+7. modules/csv.sl: Strip leading/trailing whitespace from column names
+8. src/slsmg.c,sldisply.c: Removed static buffers with sizes dependent
+   upon SLTT_MAX_SCREEN_ROWS/COLS in favor of dynamically allocated
+   ones.
+9. modules/chksum-module: added CRC-8,16,32 checksums to the chksum module
+10. modules/csv.sl: An error message in the form of a dollar-string
+    was not marked as such.
+11. modules/csv.sl: Added support for empty CSV files
+12. src/sltime.c: The timegm function will ignore the tm_wday and
+    tm_yday fields, and instead use the tm_mon and tm_mday fields.
+13. modules/mkfiles/makefile.all:  Added a target for chksum_crc.o for
+    win32/64 platforms (see change #9)
+14. modules/chksum-module.c: The memset function was used with the
+    wrong structure size causing a buffer overflow on 32 bit systems.
+15. src/terminfo/parsecaps.sl: Tweaked an auto-generated comment
+    produced by parsecaps.sl to produce a more deterministic build
+    (Ian Rogers).
+16. src/slarray.c: Changed two instances of index errors to throw an
+    IndexError exception instead of InvalidParmError exception.
+17. src/slposdir.c; The statvfs function was returning a struct with
+    duplicated f_bsize fields.
+18. *.c: In switch statements, changed the /* drop */ comment to /*
+    fall through */ to avoid gcc-8 warnings.
+19. modules/csv.sl: If a comment string appears at the start of a line
+    forming a multiline string, then treat it as part of the string.
+20. slsh/lib/timestamp.sl:  Added a function timestamp_parse that parses
+    strings such as `Thu May 14 18:05:05 2020` and returns the number
+    of seconds since the Unix epoch.
+21. src/slregexp.c: Added \D (non-digit), \s (whitespace), and \S
+    (non-whitespace).
+22. src/slstrops.c: Added a compiled regexp cache
+23. src/slstdio.c: Added trim qualifier to the fgetlines intrinsic:
+      ;trim=1 ==> trim trailing whitespace
+      ;trim=2 ==> trim leading whitespace
+      ;trim=3 ==> trim leading and trailing whitespace
+24. slsh/lib/timestamp.sl: When matching a regexp to a timestamp,
+    start with the RE that was used in the previous match.
+25. Another timestamp RE tweak to pickup additional irregular forms
+26. modules/csv.sl: If a CSV file has a byte-order mark (BOM), ignore it.
+27. src/sldisply.c: Increased the buffer size for the SLtt_tgoto
+    function to allow for larger terminfo strings
+28. modules/Makefile.in: Added STATS_OBJS to the clean target
+29. src/slstrops.c: The is_substr function was not handling a NULL
+    argument
+30. slsh/lib/timestamp.sl: Corrected a regular expression for a
+    timestamp with "Z" as the timezone.
+31. modules/csv-module.c: Fields with an embedded \r were not being
+    properly handled.
+32. src/slarray.c: Improved the speed of multi-dimensional array
+    indexing by about a factor of 2
+33. slsh/lib/timestamp.sl: The computation of leap days was incorrect
+    for some years
+34. src/slang.h:  Added `typedef void (*SLFVOID_STAR)(void)', which
+    will replace FVOID_STAR in version 3.  The library code was
+    updated to use this.
+35. slsh/lib/fswalk.sl: Added an optional callback argument to the
+    fswalk that is called when leaving a directory.
+36. modules/termios-module.c: Avoid a potential problem with the
+    tcgetpgrp intrinsic in the unlikely case that sizeof(pid_t) is
+    larger than sizeof(int).
+37. src/slarray.c: Simplified the range checking in the
+    linear_get_data_addr function and removed unused code.
+38. Updated the copyright year
+39. slsh/lib/fswalk.sl: Change #35 regression: The get_stat function
+    was being called with the wrong number of arguments.
+40. src/slarith.c: Additional binary arithmetic optimizations involving
+    arrays of char and short.
+41. src/slang.c,slarray.c: Added qualifier support to the array_map
+    function.
+42. src/slang.c: Flagged the use of an uninitialized variable as soon
+    as it is accessed ("pushed") rather than waiting until it is used
+    ("popped").  Fixed a bug in slsh/lib/setfuns.sl:union that was
+    detected by this change.
+43. src/sl-feat.h: Floating point support by the interpreter is now
+    required.  The library has not compiled without it for a long
+    time.  As such, this option is no longer available.
+44. */test/*.sl: Surrounded regression test code that makes use of
+    complex numbers with `#ifexists Complex_Type' so that they run
+    when the interpreter is compiled without complex variable support.
+45. src/slarray.c: The _pSLarray1d_push_elem needed to be exposed when
+    compiling the interpreter without optimization.
+46. src/slarith.c,...: Rewrote the various macros used by this file to
+    simplify the code, permit better optimization, and easier
+    maintenance.  Some of the loops were also unrolled.
+47. src/slarray.c: Made the array bounds index checking code more
+    uniform for better readability.
+48. src/slarray.c: The previous change introduced a bug that caused
+    array indexing with no (empty) indices to fail.
+49. modules/chksum-module.c: When a CRC object went out of scope
+    without being closed, it would leave its value on the stack.
+50. slsh/lib/process.sl: If the file descriptor that is used to
+    communicate messages from the child process back to the parent is
+    requested by the caller, then dup an unused one.  To facilitate
+    testing, two additional hooks were added: exit_hook and exec_hook.
+51. slsh/lib/cmdopt.sl: If a command line option is associated with a
+    callback function, and the value of the command line argument is
+    optional, pass the default value to the callback if not given on
+    the command line.
+52. modules: Added cumulant function to the stats module; updated
+    regression scripts/unit tests for better code coverage; fixed a
+    bug in the _zlib_inflate_reset function where deflateReset was
+    being called instead of inflateReset.
+53. slsh/lib: Updated unit/regression tests for better coverage
+54. slsh/lib/print.sl: Use >= instead of > when comparing the number
+    of screen rows to determine if the pager should be used.
+55. modules/chksum-module: Added sha224, sha256, sha384, and sha512
+    algorithms kindly provided by Jakob Stierhof
+56. modules/chksum-module: Added HMAC message authentication code
+    algorithm (Jakob Stierhof)
+57. modules/mkfiles/makefile.all: Added chksum_sha2 to the non-Unix
+    makefile.
+58. src/slgetkey.c: Use memmove instead of SLMEMCPY to avoid issues
+    with coping to an overlapping buffer. (William Ahern)
+59. modules/pcre.sl: The options qualifier was not being properly
+    handled by the pcre_matches function.
+60. src/_slang.h,etc: replaced the dependence of the internal
+    _pSLang_get_run_stack* functions, which return absolute pointers,
+    in favor of relative offsets.
+61. src/slang.c: Made the run-time stack dynamically growable up to a
+    maximum configured size.
+62. modules/: Documentation updates
+63. src/: Added _set_bos/f_compile_hook functions to specify a
+    function to get called when a statement or function gets compiled.
+64. src/sllimits.h: Reduced the initial stack size to a value similar
+    to what it was before change #61.
+65. src/slarrfun.c: array_swap was returning a copy of the input array
+    when when swapping an array element with itself (bug reported by
+    Jakob Stierhof)
+66. modules/csv.sl: If _csv_decode_row fails, include in the error
+    message the line number of the file where the error was detected
+67. modules/socket-module.c: Corrected an error message for the bind
+    function
+68. Updated the copyright year
+69. Added slcov script which generates lcov-compatible code coverage
+    data
+70. autoconf/aclocal.m4: Updated to v0.3.4.1
+71. slsh/Makefile.in: Changed the order of the linker flags to avoid a
+    linking problem on MacPorts (Ryan Schmidt)
+72. slsh/lib/cmdopt.sl: Corrected a usage message
+73. src/slposio.c: Added the flock function for the creation of
+    advisory locks
+74. src/slcurses.h: Added 'extern "C"' to enable the file to be used
+    in C++ programs; also marked some variables as dynamically
+    exportable by using SL_EXTERN (Gisle Vanem)
+75. src/slstrops.c: "%0*" was being flagged as invalid by the sprintf
+    function (Jakob Stierhof)
+76. modules/csv.sl: When writing a CSV file with a single row, convert
+    any scalar data values to single element arrays.
+77. src/Makefile.in, slsh/Makefile.in: Addressed some dependency
+    problems found by `make --shuffle` that were causing parallel
+    builds to fail (Sergei Trofimovich)
+78. src/slarray.c: Flag out-of-range indexing of indefinite ranges
+    involving negative indexes,  e.g., x = [1];  y = x[[-2:]];
+    Previousely this resulted in y = [1,1] instead of an error.
+79. modules/csv.sl: Avoid indexing an empty array with a negative
+    index (detected by change #78)
+80. src/slarray:c: #78 was flagging x[[:-2]] as invalid instead of
+    producing an empty array for x=[1]
+81. src/slarray.c: Tweaked the handling of negative indices in
+    indefinite ranges such that x[[:-i]] will produce an empty array
+    wheneve i > length(x)
+82. src/sltermin.c: Added support for so-called user-defined terminfo
+    extensions.  In particular, if the terminfo file defines RGB=true,
+    then truecolor support will be enabled.
+83. src/sldisply.c: The Has_True_Color variable was not defined for 32
+    bit systems
+84. modules/csv.sl: Improved read speed for large CSV files
+85. src/test/posixio.sl: Do not test the flock function using an NFS
+    mounted direcory, which requires lockd to be running on the server
+
+{{{ Previous Versions
+
 Changes since 2.3.1a
 1. modules/stats_kendall.c: Updated to use Knight's O(NlogN)
    algorithm.  This update was facilitating by separating out some
@@ -59,8 +242,6 @@ Changes since 2.3.1a
 25. src/sltermin.c: removed unnecessary "extern" function attribute.
 26. src/test/syntax.sl: The version number test required the use of
     isalpha and not isascii.
-
-{{{ Previous Versions
 
 Changes since 2.3.1
 a. Some tests were failing when compiled with a compiler that defaults

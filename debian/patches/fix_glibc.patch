@@ -4,10 +4,8 @@ Description: Fixes needed so that functions are visible (ip_mreq,strtoll)
 Last-Updated 2014-09-21
 Forwarded: yes
 
-Index: slang2-2.3.1/modules/socket-module.c
-===================================================================
---- slang2-2.3.1.orig/modules/socket-module.c
-+++ slang2-2.3.1/modules/socket-module.c
+--- a/modules/socket-module.c
++++ b/modules/socket-module.c
 @@ -42,6 +42,15 @@
  
  #include <sys/types.h>
@@ -34,7 +32,7 @@ Index: slang2-2.3.1/modules/socket-module.c
  
  #ifdef HAVE_ARPA_INET_H
  # include <arpa/inet.h>
-@@ -97,6 +103,8 @@ static int SocketError = -1;
+@@ -97,6 +103,8 @@
  static int SocketHerrnoError = -1;
  static int Socket_Type_Id = -1;
  

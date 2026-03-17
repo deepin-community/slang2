@@ -1,5 +1,5 @@
 % Functions that operate on sets in the form of arrays and lists:
-% Copyright (C) 2010-2017,2018 John E. Davis
+% Copyright (C) 2010-2021,2022 John E. Davis
 %
 % This file is part of the S-Lang Library and may be distributed under the
 % terms of the GNU General Public License.  See the file COPYING for
@@ -93,8 +93,8 @@ define union ()
    variable has_list = 0;
    loop (_NARGS)
      {
-	has_list += (typeof (obj) == List_Type);
 	obj = pop_set_object ();
+	has_list += (typeof (obj) == List_Type);
 	list_insert (args, obj);
      }
 

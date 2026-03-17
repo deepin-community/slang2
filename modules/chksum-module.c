@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2014-2017,2018 John E. Davis
+Copyright (C) 2014-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -48,6 +48,13 @@ static Chksum_Def_Type Chksum_Table[] =
 {
    {"md5", _pSLchksum_md5_new},
    {"sha1", _pSLchksum_sha1_new},
+   {"crc8", _pSLchksum_crc8_new},      /* qualifiers: poly, seed, refin, refout, xorout */
+   {"crc16", _pSLchksum_crc16_new},      /* qualifiers: poly, seed, ... */
+   {"crc32", _pSLchksum_crc32_new},      /* qualifiers: poly, seed, ...*/
+   {"sha224", _pSLchksum_sha256_new},
+   {"sha256", _pSLchksum_sha256_new},
+   {"sha384", _pSLchksum_sha512_new},
+   {"sha512", _pSLchksum_sha512_new},
    {NULL, NULL}
 };
 
@@ -87,7 +94,7 @@ static void chksum_free (Chksum_Object_Type *obj)
 	return;
      }
    if (obj->c != NULL)
-     (void) obj->c->close (obj->c, NULL);
+     (void) obj->c->close (obj->c, NULL, 1);
    SLfree ((char *)obj);
 }
 
@@ -103,7 +110,7 @@ static void chksum_new (char *name)
    obj = (Chksum_Object_Type *)SLmalloc (sizeof (Chksum_Object_Type));
    if (obj == NULL)
      return;
-   memset ((char *)obj, 0, sizeof(SLChksum_Type));
+   memset ((char *)obj, 0, sizeof(Chksum_Object_Type));
 
    obj->numrefs = 1;
    if (NULL == (obj->c = t->create (name)))
@@ -148,21 +155,49 @@ static void chksum_close (Chksum_Object_Type *obj)
 	(void) SLang_push_null ();
 	return;
      }
+   obj->c = NULL;
+
+   if (c->close_will_push)
+     {
+	(void) c->close (c, NULL, 0);
+	return;
+     }
 
    digest_len = c->digest_len;
    if (NULL == (digest = (unsigned char *)SLmalloc(2*digest_len+1)))
      return;
 
-   if (-1 == c->close (c, digest))
+   if (-1 == c->close (c, digest, 0))
      {
 	SLfree ((char *)digest);
 	return;
      }
-   obj->c = NULL;
+
+   if (SLang_qualifier_exists("binary")) /* allow to return the digest as BString */
+     {
+        SLang_BString_Type *bstr;
+        if (NULL == (bstr = SLbstring_create_malloced(digest, digest_len, 0)))
+           {
+	     SLang_push_null();
+	     return;
+	   }
+        (void) SLang_push_bstring(bstr);
+        SLbstring_free(bstr);
+	return;
+     }
 
    hexify_string (digest, digest_len);
-
    (void) SLang_push_malloced_string ((char *)digest);
+}
+
+static SLChksum_Type *get_chksum_type_from_obj (Chksum_Object_Type *obj)
+{
+   SLChksum_Type *c = obj->c;
+
+   if (c == NULL)
+     SLang_verror (SL_InvalidParm_Error, "Checksum object is invalid");
+
+   return c;
 }
 
 static void chksum_accumulate (Chksum_Object_Type *obj, SLang_BString_Type *b)
@@ -171,16 +206,35 @@ static void chksum_accumulate (Chksum_Object_Type *obj, SLang_BString_Type *b)
    SLstrlen_Type len;
    unsigned char *s;
 
-   if (NULL == (c = obj->c))
-     {
-	SLang_verror (SL_InvalidParm_Error, "Checksum object is invalid");
-	return;
-     }
+   if (NULL == (c = get_chksum_type_from_obj (obj)))
+     return;
+
    if (NULL == (s = SLbstring_get_pointer (b, &len)))
      return;
 
    (void) c->accumulate (c, s, len);
 }
+
+static unsigned int chksum_buffer_size (Chksum_Object_Type *obj)
+{
+   SLChksum_Type *c;
+
+   if (NULL == (c = get_chksum_type_from_obj (obj)))
+     return 0;
+
+   return c->buffer_size;
+}
+
+static unsigned int chksum_digest_length (Chksum_Object_Type *obj)
+{
+   SLChksum_Type *c;
+
+   if (NULL == (c = get_chksum_type_from_obj (obj)))
+     return 0;
+
+   return c->digest_len;
+}
+
 
 #define DUMMY_CHKSUM_TYPE ((unsigned int)-1)
 static SLang_Intrin_Fun_Type Intrinsics [] =
@@ -188,6 +242,8 @@ static SLang_Intrin_Fun_Type Intrinsics [] =
    MAKE_INTRINSIC_1 ("_chksum_new", chksum_new, SLANG_VOID_TYPE, SLANG_STRING_TYPE),
    MAKE_INTRINSIC_2 ("_chksum_accumulate", chksum_accumulate, SLANG_VOID_TYPE, DUMMY_CHKSUM_TYPE, SLANG_BSTRING_TYPE),
    MAKE_INTRINSIC_1 ("_chksum_close", chksum_close, SLANG_VOID_TYPE, DUMMY_CHKSUM_TYPE),
+   MAKE_INTRINSIC_1 ("_chksum_digest_length", chksum_digest_length, SLANG_UINT_TYPE, DUMMY_CHKSUM_TYPE),
+   MAKE_INTRINSIC_1 ("_chksum_buffer_size", chksum_buffer_size, SLANG_UINT_TYPE, DUMMY_CHKSUM_TYPE),
    SLANG_END_INTRIN_FUN_TABLE
 };
 

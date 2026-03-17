@@ -3,7 +3,7 @@
 /* header file for S-Lang internal structures that users do not (should not)
    need.  Use slang.h for that purpose. */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -466,7 +466,10 @@ extern int _pSLstruct_push_field_ref (SLFUTURE_CONST char *);
 extern int _pSLstruct_push_field (SLang_Struct_Type *s, SLFUTURE_CONST char *name, int do_free);
 extern int _pSLstruct_pop_field (SLang_Struct_Type *s, SLFUTURE_CONST char *name, int do_free);
 
-extern int _pSLang_get_qualifiers_intrin (SLang_Struct_Type **);
+extern int _pSLang_get_qualifiers_intrin (SLang_Struct_Type **);   /* Value is not to be freed by caller */
+
+extern int _pSLang_get_qualifiers (SLang_Struct_Type **);   /* Caller must free when done */
+extern int _pSLang_set_qualifiers (SLang_Struct_Type *);
 
 struct _pSLang_Ref_Type
 {
@@ -562,8 +565,6 @@ extern int _pSLpush_dollar_string (SLFUTURE_CONST char *);
 extern char *_pSLstringize_object (SLang_Object_Type *);
 extern int _pSLdump_objects (char *, SLang_Object_Type *, unsigned int, int);
 
-extern SLang_Object_Type *_pSLang_get_run_stack_pointer (void);
-extern SLang_Object_Type *_pSLang_get_run_stack_base (void);
 extern int _pSLang_dump_stack (void);
 extern int _pSLang_peek_at_stack2 (SLtype *);
 extern int _pSLang_restart_arg_list (int nargs);
@@ -638,6 +639,8 @@ extern int _pSLcall_eos_handler (void);
 extern int _pSLcall_bof_handler (SLFUTURE_CONST char *, SLFUTURE_CONST char *);
 extern int _pSLcall_eof_handler (void);
 extern int _pSLcall_debug_hook (SLFUTURE_CONST char *file, int linenum);
+extern int _pSLcall_bos_compile_hook (const char *file, long linenum);
+extern int _pSLcall_bof_compile_hook (const char *file, const char *func);
 /* extern int _pSLcall_debug_hook (char *file, int linenum, char *funct); */
 #endif
 
@@ -903,8 +906,8 @@ extern void _pSLang_set_arith_type (SLtype, unsigned char);
 extern SLclass_Type _pSLang_get_class_type (SLtype);
 extern void _pSLang_set_class_info (SLtype, SLang_Class_Type *);
 extern int _pSLarray_bin_op (SLang_Object_Type *, SLang_Object_Type *, int);
-extern int _pSLarray1d_push_elem (SLang_Array_Type *at, SLindex_Type idx);
 #endif
+extern int _pSLarray1d_push_elem (SLang_Array_Type *at, SLindex_Type idx);
 extern int _pSLarith_bin_op (SLang_Object_Type *, SLang_Object_Type *, int);
 
 /* Does not perform any range checking.  It is up to the caller.

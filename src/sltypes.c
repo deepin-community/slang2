@@ -1,6 +1,6 @@
 /* Basic type operations for S-Lang */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -598,8 +598,8 @@ static int ref_push (SLtype type, VOID_STAR ptr)
 
 int SLang_assign_to_ref (SLang_Ref_Type *ref, SLtype type, VOID_STAR v)
 {
-   SLang_Object_Type *stkptr;
    SLang_Class_Type *cl;
+   int stack_depth;
 
    cl = _pSLclass_get_class (type);
 
@@ -623,11 +623,11 @@ int SLang_assign_to_ref (SLang_Ref_Type *ref, SLtype type, VOID_STAR v)
    if (-1 == (*cl->cl_apush) (type, v))
      return -1;
 
-   stkptr = _pSLang_get_run_stack_pointer ();
+   stack_depth = SLstack_depth ();
    if (0 == _pSLang_deref_assign (ref))
      return 0;
 
-   if (stkptr != _pSLang_get_run_stack_pointer ())
+   if (stack_depth != SLstack_depth ())
      SLdo_pop ();
 
    return -1;

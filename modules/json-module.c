@@ -1,6 +1,6 @@
 /* -*- mode: C; mode: fold -*- */
 /*
-Copyright (C) 2013-2017,2018 John E. Davis, Manfred Hanke
+Copyright (C) 2013-2021,2022 John E. Davis, Manfred Hanke
 
 This file is part of the S-Lang Library.
 
@@ -558,7 +558,7 @@ static void free_string_array (char **sp, unsigned int n)
    SLfree ((char *)sp);
 }
 
-/* This has table implementation does not copy the strings */
+/* This hash table implementation does not copy the strings */
 #define HASH_TABLE_SIZE 601
 typedef struct String_Hash_Elem_Type
 {

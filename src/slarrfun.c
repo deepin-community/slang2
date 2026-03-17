@@ -1,6 +1,6 @@
 /* Advanced array manipulation routines for S-Lang */
 /*
-Copyright (C) 2004-2017,2018 John E. Davis
+Copyright (C) 2004-2021,2022 John E. Davis
 
 This file is part of the S-Lang Library.
 
@@ -795,7 +795,7 @@ static void do_inner_product (void)
    (*fun)(a, b, c, a_loops, a_stride, b_loops, b_inc, ai_dims);
 
    (void) SLang_push_array (c, 1);
-   /* drop */
+   /* fall through */
 
    free_and_return:
    SLang_free_array (a);
@@ -912,7 +912,8 @@ static int map_or_contract_array (SLCONST SLarray_Map_Type *c, int use_contracti
 	old_num_dims = 1;
      }
 
-   fcon = (SLarray_Contract_Fun_Type *) c->f;
+   /* Use double cast to avoid gcc warning */
+   fcon = (SLarray_Contract_Fun_Type *) (SLFvoid_Star) c->f;
    fmap = c->f;
 
    if (use_contraction
@@ -1537,7 +1538,7 @@ static int check_range_indices (int len, int *ip, int *jp)
 /* Usage: array_swap (a, i, j [,dim]);  (dim not yet supported) */
 static void array_swap (void)
 {
-   int i, j;
+   SLindex_Type i, j;
    int len;
    unsigned char *src, *dst;
    size_t sizeof_type;
@@ -1554,15 +1555,16 @@ static void array_swap (void)
 	have_dim = 1;
      }
 
-   if ((-1 == SLang_pop_integer (&j))
-       || (-1 == SLang_pop_integer (&i)))
+   if ((-1 == SLang_pop_array_index (&j))
+       || (-1 == SLang_pop_array_index (&i))
+       || (-1 == pop_writable_array (&at)))
      return;
 
    if (i == j)
-     return;			       /* leave array on stack */
-
-   if (-1 == pop_writable_array (&at))
-     return;
+     {
+	SLang_free_array (at);
+	return;
+     }
 
    if (have_dim)
      {
@@ -1835,7 +1837,7 @@ static int do_wherefirstlast_op (const char *fname, int is_first, int op)
       case 3:
 	if (-1 == SLang_pop_array_index (&istart))
 	  return -1;
-	/* drop */
+	/* fall through */
       case 2:
 	if (-1 == SLstack_exch (0, 1))
 	  return -1;
