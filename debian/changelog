@@ -1,3 +1,9 @@
+slang2 (2.3.3-6) unstable; urgency=medium
+
+  * Rebuild with LTO enabled (dpkg vendor feature optimize/lto).
+
+ -- tunaichao <tunaichao@uniontech.com>  Thu, 10 Sep 2026 20:51:22 +0800
+
 slang2 (2.3.3-5) unstable; urgency=medium
 
   * Standards-Version: 4.7.0; no changes required
